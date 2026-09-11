@@ -1,6 +1,6 @@
 # 课题组小鼠管理系统
 
-专为生物实验室/课题组定制的小鼠管理与流转联动系统。系统深度整合**小鼠档案**、**笼位分布**、**转鼠需求及反馈**、**基因型鉴定结果**、**课题组领取人**与**引物档案**，全站实施安全登录保护，支持群晖 NAS (Synology NAS) Docker 与 Cloudflare 在线部署。
+专为生物实验室/课题组定制的小鼠管理与流转联动系统。系统深度整合**小鼠档案**、**笼位分布**、**转鼠需求及反馈**、**基因型鉴定结果**、**课题组领取人**与**引物档案**，全站实施安全登录保护，支持 Docker 在线部署。
 
 ---
 
@@ -47,75 +47,41 @@
 - 输入账号密码登录：
   - 使用迁移输出目录 `credentials.txt` 中的账号登录。
 
-### 2. 群晖 NAS (Synology NAS) Docker 部署
-1. 在 Windows 项目目录中生成本地部署包：
-   ```powershell
-   .\build-nas.ps1
+### 2. Docker 部署
+
+镜像发布在 [Docker Hub：`achuan1037/mouse-manager`](https://hub.docker.com/repository/docker/achuan1037/mouse-manager)，无需下载源码或在本地构建。
+
+1. 创建用于持久化数据和读取 Excel 的目录：
+
+   ```bash
+   mkdir -p mouse-manager/data mouse-manager/excel
+   cd mouse-manager
    ```
-   脚本会重新创建项目下的 `build` 文件夹，并把 `backend`、`frontend`、Docker 配置、空的 `data` 目录及本地 `excel` 文件放进去。如不需要打包 Excel，请运行 `.\build-nas.ps1 -ExcludeExcel`。
-2. 将 `build` 文件夹中的全部内容手动复制到群晖部署目录（例如 `/volume1/苏济雄个人/docker/mouse-manager`），再根据 `.env.example` 在群晖端创建 `.env`。
-3. 在群晖 **Container Manager** 中点击“项目” -> “新增”，选择该目录并使用现有的 `docker-compose.yml` 启动。
-4. 数据持久化存放在 `./data` 目录：`mouse-manager.db` 保存小鼠业务数据，`accounts.db` 单独保存账号和密码哈希。完整备份需同时保留这两个数据库，最简单的方式是备份整个 `data` 文件夹；网站内的数据库导出/恢复仅处理小鼠业务数据库，不会覆盖账号。
-5. 在内网通过 `http://群晖IP:8000` 访问。
 
-### 3. Cloudflare Workers + D1 部署
+2. 拉取最新版镜像：
 
-线上地址：<https://mouse.achuan-2.top>。Vue 静态资源由 Workers Assets 托管，API 使用 Hono，数据保存在 D1；本机无需持续开机。Docker 入口继续使用 FastAPI + SQLite。两套后端分别实现业务逻辑，修改接口时应同步检查两套实现。
+   ```bash
+   docker pull achuan1037/mouse-manager:latest
+   ```
 
-#### 首次部署到自己的 Cloudflare 账号
+3. 启动容器。请将示例中的密钥和初始管理员密码替换为自己的值：
 
-安装 Node.js 和 pnpm，在项目根目录执行：
+   ```bash
+   docker run -d \
+     --name mouse-manager \
+     --restart unless-stopped \
+     -p 8000:8000 \
+     -v "$(pwd)/data:/app/data" \
+     -v "$(pwd)/excel:/app/excel:ro" \
+     -e SECRET_KEY="请替换为随机长密钥" \
+     -e ADMIN_PASSWORD="请替换为初始管理员密码" \
+     -e TZ="Asia/Shanghai" \
+     achuan1037/mouse-manager:latest
+   ```
 
-```powershell
-pnpm install --frozen-lockfile
-pnpm --dir frontend install --frozen-lockfile
-pnpm exec wrangler login
-pnpm exec wrangler d1 create mouse-lab
-```
+4. 浏览器访问 `http://服务器IP:8000`。群晖 NAS 用户也可以在 **Container Manager** 的注册表中搜索 `achuan1037/mouse-manager` 并下载 `latest` 镜像，然后按上述端口、文件夹映射和环境变量创建容器。
 
-修改 `wrangler.jsonc`：填写新建数据库的 `database_id`；将 `routes` 中的域名改为自己在 Cloudflare 托管的域名，或删除 `routes` 使用 `workers.dev`。仓库中的数据库 ID 和域名属于当前线上实例，不适用于其他账号。
+数据持久化存放在宿主机的 `data` 目录：`mouse-manager.db` 保存小鼠业务数据，`accounts.db` 单独保存账号和密码哈希。完整备份需同时保留这两个数据库，最简单的方式是备份整个 `data` 文件夹；网站内的数据库导出/恢复仅处理小鼠业务数据库，不会覆盖账号。
 
-从本地 `data/mouse-manager.db` 生成迁移快照（需先按本地启动流程安装后端环境）：
 
-```powershell
-backend\.venv\Scripts\python.exe scripts/prepare_cloudflare_data.py
-pnpm db:migrate:remote
-pnpm exec wrangler d1 execute mouse-lab --remote --file migration-output/initial/initial-data.sql
-pnpm exec wrangler secret put SECRET_KEY
-pnpm run deploy:cloudflare
-```
 
-`SECRET_KEY` 交互输入一段随机长密钥。生成的账号凭据见 `migration-output/initial/credentials.txt`；原本已经自定义的密码保持原值。迁移输出和密钥文件不要提交到 Git。首次数据导入仅适用于空库。Workers 无法扫描本机 `excel` 文件夹，后续通过网站上传 Excel；大文件建议逐份上传，避免单次解析触发 CPU 限制。
-
-#### 更新已部署网站的代码
-
-在项目根目录更新代码并安装依赖后执行：
-
-```powershell
-pnpm install --frozen-lockfile
-pnpm --dir frontend install --frozen-lockfile
-pnpm test:cloudflare
-pnpm run deploy:cloudflare
-```
-
-部署命令会重新构建前端并发布 Worker 和静态资源，也会沿用配置中的自定义域名。正常代码更新不会清空 D1，不要重新执行首次数据导入或数据重置；`SECRET_KEY` 也不必每次重设。
-
-如果更新包含新增的 `cloudflare/migrations/*.sql`，先从网站导出数据库备份，再执行 `pnpm db:migrate:remote`，然后发布。Cloudflare 和 Docker 两套后端都修改时，还需运行 `uv run --project backend --no-sync python -m unittest discover -s backend/tests -v`。
-
-发布后检查 <https://mouse.achuan-2.top/api/health>，再验证登录、小鼠列表与实际修改的功能。仅回退 Worker 代码可用 `pnpm exec wrangler rollback`；该命令不会回退数据库，需确认旧代码与当前表结构兼容。
-
-Windows 如需使用本机 7890 代理，在当前 PowerShell 会话设置：
-
-```powershell
-$env:HTTP_PROXY = 'http://127.0.0.1:7890'
-$env:HTTPS_PROXY = 'http://127.0.0.1:7890'
-```
-
-性能配置启用了 [Smart Placement](https://developers.cloudflare.com/workers/configuration/placement/)，由 Cloudflare 根据请求延迟决定 API 的执行位置；静态资源仍由边缘节点托管。笼位和小鼠列表使用只读数据索引，避免逐只扫描鉴定记录及复制整份查询数据。实际速度还受客户端网络和数据库访问延迟影响。更多迁移和 Docker 说明见 [CLOUDFLARE.md](./CLOUDFLARE.md)。
-
-### 4. Cloudflare Tunnel 临时在线体验
-在本地或服务器上执行：
-```powershell
-.\cloudflare_tunnel.ps1
-```
-终端将输出分配的临时安全公网链接（如 `https://xxxx.trycloudflare.com`），发送给导师或同学即可在手机/外网直接访问体验。
