@@ -1,0 +1,23 @@
+services:
+  mouse-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mouse-manager:latest
+    container_name: mouse-manager
+    restart: unless-stopped
+    ports:
+      - "${MOUSE_MANAGER_PORT:-8000}:8000"
+    volumes:
+      # 持久化存储 SQLite 数据库与上传文件 (群晖 NAS 对应共享文件夹)
+      - ./data:/app/data
+      # 挂载 Excel 文件夹以支持自动同步或重新导入
+      - ./excel:/app/excel:ro
+    environment:
+      - SECRET_KEY=${SECRET_KEY:?请在 .env 配置随机 SECRET_KEY}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?请在 .env 配置初始管理员密码}
+      - DATA_DIR=/app/data
+      - TZ=Asia/Shanghai
+      - PORT=8000
+    security_opt:
+      - no-new-privileges:true
