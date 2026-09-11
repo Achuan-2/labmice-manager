@@ -44,8 +44,7 @@
   .\start.ps1
   ```
 - 浏览器打开访问：**`http://localhost:8000`**。
-- 输入账号密码登录：
-  - 使用迁移输出目录 `credentials.txt` 中的账号登录。
+
 
 ### 2. Docker 部署
 
