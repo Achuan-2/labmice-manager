@@ -11,7 +11,7 @@
             v-model="groupName"
             maxlength="64"
             show-word-limit
-            placeholder="例如：神经环路课题组"
+            placeholder=""
             style="width: 320px; max-width: 100%"
             @keyup.enter="saveGroupName"
           />
