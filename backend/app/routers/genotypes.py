@@ -110,7 +110,7 @@ def list_genotypes(
                 "mouse_code": gt.mouse_code,
                 "test_date": gt.test_date,
                 "strain": gt.strain or (gt.mouse.strain if gt.mouse else ""),
-                "dob": gt.dob or (gt.mouse.dob if gt.mouse else None),
+                "dob": gt.mouse.dob if gt.mouse else gt.dob,
                 "gender": gt.gender or (gt.mouse.gender if gt.mouse else None),
                 "parents": p,
                 "genotype_1": gt.genotype_1,
@@ -139,7 +139,7 @@ def list_genotypes(
             "mouse_code": gt.mouse_code,
             "test_date": gt.test_date,
             "strain": gt.strain or (gt.mouse.strain if gt.mouse else ""),
-            "dob": gt.dob or (gt.mouse.dob if gt.mouse else None),
+            "dob": gt.mouse.dob if gt.mouse else gt.dob,
             "gender": gt.gender or (gt.mouse.gender if gt.mouse else None),
             "parents": p,
             "genotype_1": gt.genotype_1,
@@ -195,6 +195,8 @@ def _add_genotype_record(data, db, current_user):
 
     # Sync to mouse record
     if mouse:
+        if data.dob:
+            mouse.dob = data.dob
         if data.gender and mouse.gender == "未知":
             mouse.gender = data.gender
         db.flush()
@@ -241,6 +243,8 @@ def update_genotype_record(
 
     db.flush()
     mouse = gt.mouse or db.query(Mouse).filter(Mouse.mouse_code == gt.mouse_code).first()
+    if mouse and "dob" in update_dict:
+        mouse.dob = update_dict["dob"] or None
     _sync_mouse_genotype_summary(mouse, db)
     db.commit()
     db.refresh(gt)
