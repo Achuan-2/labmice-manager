@@ -25,7 +25,9 @@ def list_transfer_requests(
     query = db.query(TransferRequest)
     if demander:
         query = query.filter(TransferRequest.demander.ilike(f"%{demander.strip()}%"))
-    if status:
+    if status == "已完成":
+        query = query.filter(TransferRequest.status.in_(["已完成", "已转"]))
+    elif status:
         query = query.filter(TransferRequest.status == status)
     if strain:
         query = query.filter(TransferRequest.strain.ilike(f"%{strain.strip()}%"))
@@ -80,7 +82,7 @@ def get_assigned_mice(request_id: int, db: Session = Depends(get_db), current_us
     if req is None:
         raise HTTPException(404, "转鼠申请未找到")
     snapshots = {item.mouse_id: item for item in db.query(TransferRequestAssignment).filter_by(request_id=req.id).all()}
-    codes = parse_codes(req.mouse_codes) if req.status == "已转" else []
+    codes = parse_codes(req.mouse_codes) if req.status in {"进行中", "已完成", "已转"} else []
     mice = db.query(Mouse).filter(Mouse.mouse_code.in_(codes)).all() if codes else []
     result = []
     for mouse in mice:

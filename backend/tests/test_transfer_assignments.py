@@ -40,7 +40,40 @@ class TransferAssignmentTests(unittest.TestCase):
         return process_transfer_request(self.req_id, TransferRequestUpdate(**updates), self.db, self.admin)
 
     def approve(self, codes="M0, M1"):
-        return self.save(status="已转", mouse_codes=codes)
+        return self.save(status="已完成", mouse_codes=codes)
+
+    def stage(self, codes="M0, M1"):
+        return self.save(status="进行中", mouse_codes=codes)
+
+    def test_in_progress_assigns_owner_without_removing_from_cage(self):
+        self.stage()
+        self.assertEqual(self.req.status, "进行中")
+        for mouse in self.mice[:2]:
+            self.assertEqual(mouse.cage_id, self.original_cages[mouse.mouse_code])
+            self.assertEqual((mouse.status, mouse.owner_name), ("已领用", "领取人甲"))
+            self.assertIsNone(mouse.claim_date)
+        assigned = get_assigned_mice(self.req_id, self.db, self.admin)
+        self.assertEqual({row["mouse_code"] for row in assigned}, {"M0", "M1"})
+
+    def test_complete_in_progress_request_removes_assigned_mice_from_cage(self):
+        self.stage()
+        self.save(status="已完成")
+        self.assertEqual(self.req.status, "已完成")
+        for mouse in self.mice[:2]:
+            self.assertIsNone(mouse.cage_id)
+            self.assertEqual((mouse.status, mouse.owner_name), ("出笼", "领取人甲"))
+            self.assertIsNotNone(mouse.claim_date)
+
+    def test_complete_accepts_legacy_staged_snapshot_normalized_to_claimed(self):
+        self.stage("M0")
+        assignment = self.db.query(TransferRequestAssignment).one()
+        legacy_state = dict(assignment.assigned_state)
+        legacy_state["status"] = "在笼"
+        assignment.assigned_state = legacy_state
+        self.db.commit()
+
+        self.save(status="已完成")
+        self.assertEqual((self.mice[0].status, self.mice[0].cage_id), ("出笼", None))
 
     def test_approval_snapshot_logs_and_candidate_api(self):
         self.approve()
@@ -75,7 +108,7 @@ class TransferAssignmentTests(unittest.TestCase):
     def test_separate_approvals_do_not_merge_history(self):
         self.approve("M0")
         self.save(mouse_codes="M0, M2")
-        logs = self.db.query(TransferLog).filter_by(action_type="转鼠/审批处理").all()
+        logs = self.db.query(TransferLog).filter_by(action_type="转鼠/完成领取").all()
         self.assertEqual(len(logs), 2)
         self.assertTrue(all(log.mouse_count == 1 for log in logs))
 
@@ -105,13 +138,14 @@ class TransferAssignmentTests(unittest.TestCase):
     def test_return_to_in_progress_restores_all(self):
         self.approve()
         self.save(status="进行中")
-        self.assertTrue(all(mouse.cage_id for mouse in self.mice))
+        for mouse in self.mice[:2]:
+            self.assertEqual(mouse.cage_id, self.original_cages[mouse.mouse_code])
+            self.assertEqual((mouse.status, mouse.owner_name), ("已领用", "领取人甲"))
 
-    def test_unselect_last_mouse_restores_and_reopens_request(self):
-        self.approve("M0")
-        self.save(status="已转", mouse_codes="")
-        self.assertEqual(self.req.status, "进行中")
-        self.assertEqual(self.mice[0].cage_id, self.original_cages["M0"])
+    def test_in_progress_requires_a_selected_mouse(self):
+        with self.assertRaises(HTTPException) as error:
+            self.save(status="进行中", mouse_codes="")
+        self.assertEqual(error.exception.status_code, 400)
 
     def test_reassignment_preserves_original_snapshot(self):
         self.approve()
@@ -126,7 +160,7 @@ class TransferAssignmentTests(unittest.TestCase):
         self.db.add(req)
         self.db.commit()
         with self.assertRaises(HTTPException) as error:
-            process_transfer_request(req.id, TransferRequestUpdate(status="已转", mouse_codes="M0"), self.db, self.admin)
+            process_transfer_request(req.id, TransferRequestUpdate(status="已完成", mouse_codes="M0"), self.db, self.admin)
         self.assertEqual(error.exception.status_code, 409)
         self.assertEqual(self.mice[0].owner_name, "领取人甲")
 
@@ -136,7 +170,7 @@ class TransferAssignmentTests(unittest.TestCase):
         self.db.commit()
         with self.assertRaises(HTTPException):
             self.save(status="取消")
-        self.assertEqual(self.req.status, "已转")
+        self.assertEqual(self.req.status, "已完成")
         self.assertIsNone(self.mice[0].cage_id)
         self.assertEqual(self.mice[1].status, "死亡")
         self.assertEqual(self.db.query(TransferRequestAssignment).count(), 2)
@@ -161,6 +195,9 @@ class TransferAssignmentTests(unittest.TestCase):
         self.req.status = "已转"
         self.req.mouse_codes = "M0"
         self.db.commit()
+        self.save(status="已完成", feedback="仅编辑历史申请备注")
+        self.assertEqual(self.req.feedback, "仅编辑历史申请备注")
+        self.assertEqual(self.req.status, "已完成")
         with self.assertRaises(HTTPException) as error:
             self.save(status="取消")
         self.assertIn("历史分配", error.exception.detail)

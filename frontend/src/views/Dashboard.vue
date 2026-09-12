@@ -118,8 +118,14 @@
         </el-table-column>
         <el-table-column v-if="authStore.isAdmin" label="操作" width="110" fixed="right">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="openApproval(row)">
-              审批处理
+            <el-button
+              :type="row.status === '进行中' ? 'success' : 'primary'"
+              link
+              size="small"
+              :loading="quickCompletingRequestId === row.id"
+              @click="row.status === '进行中' ? completeRequest(row) : openApproval(row)"
+            >
+              {{ row.status === '进行中' ? '点击完成' : '审批处理' }}
             </el-button>
           </template>
         </el-table-column>
@@ -221,7 +227,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { statsApi, todosApi } from '@/api'
+import { statsApi, todosApi, transferRequestsApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { useClaimerColors } from '@/composables/useClaimerColors'
 import MouseDetailModal from '@/components/MouseDetailModal.vue'
@@ -237,6 +243,7 @@ const loading = ref(false)
 const todayTodos = ref([])
 const todosLoading = ref(false)
 const updatingTodoId = ref(null)
+const quickCompletingRequestId = ref(null)
 const showMouseDetail = ref(false)
 const selectedMouseId = ref(null)
 const selectedMouseCode = ref('')
@@ -259,6 +266,19 @@ function openApproval(row) {
     path: '/transfer-requests',
     query: { approve: String(row.id) }
   })
+}
+
+async function completeRequest(row) {
+  quickCompletingRequestId.value = row.id
+  try {
+    await transferRequestsApi.processRequest(row.id, { status: '已完成' })
+    ElMessage.success('转鼠需求已完成，小鼠已转为出笼')
+    await loadStats()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '完成转鼠需求失败')
+  } finally {
+    quickCompletingRequestId.value = null
+  }
 }
 
 function todoSourceTag(source) {

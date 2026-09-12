@@ -18,9 +18,9 @@
         />
 
         <el-select v-model="filters.status" clearable placeholder="全部状态" style="width: 130px" @change="loadRequests">
-          <el-option label="申请中" value="申请中" />
           <el-option label="进行中" value="进行中" />
-          <el-option label="已转" value="已转" />
+          <el-option label="申请中" value="申请中" />
+          <el-option label="已完成" value="已完成" />
           <el-option label="取消" value="取消" />
         </el-select>
 
@@ -229,9 +229,9 @@
           <template #default="{ row }">
             <el-tag
               size="small"
-              :type="row.status === '已转' ? 'success' : (row.status === '取消' ? 'danger' : 'warning')"
+              :type="isCompletedStatus(row.status) ? 'success' : (row.status === '取消' ? 'danger' : (row.status === '进行中' ? 'primary' : 'warning'))"
             >
-              {{ row.status }}
+              {{ displayStatus(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -249,14 +249,35 @@
           <template #default="{ row }">
             <div class="flex items-center gap-1">
               <el-button
+                v-if="row.status === '进行中'"
+                size="small"
+                type="success"
+                link
+                :loading="quickCompletingId === row.id"
+                @click="completeRequest(row)"
+              >
+                点击完成
+              </el-button>
+              <el-button
+                v-if="row.status === '进行中'"
                 size="small"
                 type="primary"
                 link
                 @click="openProcessDialog(row)"
               >
-                {{ row.status === '已转' ? '编辑' : '审批处理' }}
+                编辑
+              </el-button>
+              <el-button
+                v-if="row.status !== '进行中'"
+                size="small"
+                type="primary"
+                link
+                @click="openProcessDialog(row)"
+              >
+                {{ isCompletedStatus(row.status) ? '查看' : '审批处理' }}
               </el-button>
               <el-popconfirm
+                v-if="row.status !== '进行中'"
                 title="确定删除此需求？已分配的小鼠将撤销分配并恢复原笼位。"
                 @confirm="handleDelete(row.id)"
               >
@@ -364,7 +385,7 @@
     </el-dialog>
 
     <!-- Admin Process Request Dialog -->
-    <el-dialog v-model="showProcessDialog" title="审批与处理转鼠申请" width="min(960px, 94vw)">
+    <el-dialog v-model="showProcessDialog" :title="isCompletedStatus(currentReq?.status) ? '查看转鼠申请' : '审批与处理转鼠申请'" width="min(960px, 94vw)">
       <el-form :model="processForm" label-width="125px">
         <div class="bg-gray-50 p-3 rounded-lg text-xs mb-4 text-gray-700">
           <div>需求者：<b>{{ currentReq?.demander }}</b> (申请品系: <b>{{ currentReq?.strain }}</b>)</div>
@@ -373,8 +394,8 @@
 
         <el-form-item label="审核处理状态" required>
           <el-radio-group v-model="processForm.status">
-            <el-radio value="已转">已转 (审批通过)</el-radio>
             <el-radio value="进行中">进行中 (备鼠中)</el-radio>
+            <el-radio value="已完成">已完成 (已交付)</el-radio>
             <el-radio value="取消">取消需求</el-radio>
           </el-radio-group>
         </el-form-item>
@@ -405,7 +426,7 @@
           </el-select>
         </el-form-item>
 
-        <template v-if="processForm.status === '已转'">
+        <template v-if="['进行中', '已完成'].includes(processForm.status)">
           <div class="candidate-panel">
             <div class="candidate-toolbar">
               <div>
@@ -508,13 +529,15 @@
               @blur="syncCandidateSelectionFromCodes"
             />
             <div class="text-xs text-gray-400 mt-1">
-              保存审批后，小鼠将归属需求者并自动出笼，档案日志保留原鼠房及笼位。取消勾选或移除编号后保存，将恢复该鼠分配前的笼位和领取信息。
+              <template v-if="processForm.status === '进行中'">保存后只设置领取人，小鼠仍保留在原笼位；实际交付后再从列表点击“点击完成”。</template>
+              <template v-else>保存为已完成后，小鼠将自动出笼；档案日志会保留原鼠房及笼位。</template>
+              取消勾选或移除编号后保存，将恢复该鼠分配前的笼位和领取信息。
             </div>
           </el-form-item>
         </template>
 
-        <div v-if="currentReq?.status === '已转'" class="text-xs text-orange-600 mb-3">
-          已分配小鼠会保留在候选列表中，不受筛选影响。清空全部编号后保存，将全部回笼并把需求改为“进行中”；改为“取消”也会全部回笼。
+        <div v-if="isCompletedStatus(currentReq?.status)" class="text-xs text-orange-600 mb-3">
+          已分配小鼠会保留在候选列表中，不受筛选影响。改为“进行中”会让小鼠回到原笼位并保留领取人；改为“取消”会恢复分配前的全部信息。
         </div>
 
         <el-form-item label="小鼠性别">
@@ -559,6 +582,7 @@ const router = useRouter()
 const { getClaimerTagStyle, fetchClaimerColors } = useClaimerColors()
 
 const loading = ref(false)
+const quickCompletingId = ref(null)
 const requests = ref([])
 const strainOptions = ref([])
 const roomOptions = ref([])
@@ -613,7 +637,11 @@ function getAgeReqSortKey(val) {
 
 const sortedRequests = computed(() => {
   if (!sortConfig.prop || !sortConfig.order) {
-    return requests.value
+    const statusOrder = { '进行中': 1, '申请中': 2, '已完成': 3, '已转': 3, '取消': 4 }
+    return [...requests.value].sort((a, b) => {
+      const statusDiff = (statusOrder[a.status] || 99) - (statusOrder[b.status] || 99)
+      return statusDiff || (Number(b.id) || 0) - (Number(a.id) || 0)
+    })
   }
   const { prop, order } = sortConfig
   const list = requests.value
@@ -639,7 +667,7 @@ const sortedRequests = computed(() => {
     } else if (prop === 'source_room') {
       key = item.source_room || ''
     } else if (prop === 'status') {
-      const statusOrder = { '申请中': 1, '进行中': 2, '已转': 3, '取消': 4 }
+      const statusOrder = { '进行中': 1, '申请中': 2, '已完成': 3, '已转': 3, '取消': 4 }
       key = statusOrder[item.status] || 99
     } else {
       key = String(item[prop] || '')
@@ -686,6 +714,14 @@ function splitMouseCodes(str) {
   return str.replace(/，/g, ',').replace(/、/g, ',').split(',').map(s => s.trim()).filter(Boolean)
 }
 
+function isCompletedStatus(status) {
+  return ['已完成', '已转'].includes(status)
+}
+
+function displayStatus(status) {
+  return isCompletedStatus(status) ? '已完成' : status
+}
+
 const filters = reactive({
   demander: '',
   status: ''
@@ -722,7 +758,7 @@ const showProcessDialog = ref(false)
 const currentReq = ref(null)
 const processing = ref(false)
 const processForm = reactive({
-  status: '已转',
+  status: '进行中',
   strain: '',
   source_room: '枫林',
   mouse_codes: '',
@@ -1080,7 +1116,7 @@ async function openProcessDialog(row) {
   currentReq.value = row
   const savedSourceRoom = String(row.source_room || '').trim()
   Object.assign(processForm, {
-    status: row.status === '申请中' ? '已转' : row.status,
+    status: row.status === '申请中' ? '进行中' : (isCompletedStatus(row.status) ? '已完成' : row.status),
     strain: row.strain || '',
     source_room: roomOptions.value.includes(savedSourceRoom) ? savedSourceRoom : (roomOptions.value[0] || ''),
     mouse_codes: row.mouse_codes || '',
@@ -1101,7 +1137,7 @@ async function submitProcess() {
     ElMessage.warning('请选择或输入小鼠品系')
     return
   }
-  if (processForm.status === '已转' && parseMouseCodes(processForm.mouse_codes).length === 0 && currentReq.value.status !== '已转') {
+  if (['进行中', '已完成'].includes(processForm.status) && parseMouseCodes(processForm.mouse_codes).length === 0) {
     ElMessage.warning('请勾选候选小鼠或直接输入小鼠编号')
     return
   }
@@ -1115,6 +1151,19 @@ async function submitProcess() {
     ElMessage.error(e.response?.data?.detail || '处理失败')
   } finally {
     processing.value = false
+  }
+}
+
+async function completeRequest(row) {
+  quickCompletingId.value = row.id
+  try {
+    await transferRequestsApi.processRequest(row.id, { status: '已完成' })
+    ElMessage.success('转鼠需求已完成，小鼠已转为出笼')
+    await loadRequests()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '完成转鼠需求失败')
+  } finally {
+    quickCompletingId.value = null
   }
 }
 

@@ -172,7 +172,7 @@ class TransferRequest(Base):
     source_room = Column(String(64), nullable=True)  # 转出鼠房 (如 "枫林", "江湾")
     mouse_gender = Column(String(32), nullable=True)  # 小鼠实际性别 (M, F, M/F)
     mouse_codes = Column(Text, nullable=True)  # 分配的小鼠编号，逗号隔开 (如 "E962, E964")
-    status = Column(String(32), default="申请中", index=True)  # "申请中", "进行中", "已转", "取消"
+    status = Column(String(32), default="申请中", index=True)  # "申请中", "进行中", "已完成", "取消"（兼容旧值“已转”）
     feedback = Column(Text, nullable=True)  # 反馈说明/备注
     handler = Column(String(64), nullable=True)  # 经办管理员
     created_at = Column(DateTime, default=datetime.datetime.utcnow)

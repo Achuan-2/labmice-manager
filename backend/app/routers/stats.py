@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import case, func
 
 from backend.app.database import get_db
 from backend.app.models.models import Mouse, Cage, Claimer, Primer, Room, TransferRequest, GenotypeRecord, User
@@ -54,7 +54,10 @@ def get_dashboard_stats(
     pending_requests = (
         db.query(TransferRequest)
         .filter(TransferRequest.status.in_(["申请中", "进行中"]))
-        .order_by(TransferRequest.id.desc())
+        .order_by(
+            case((TransferRequest.status == "进行中", 0), else_=1),
+            TransferRequest.id.desc(),
+        )
         .limit(8)
         .all()
     )
