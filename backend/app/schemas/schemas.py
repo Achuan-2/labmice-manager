@@ -17,6 +17,9 @@ class UserUpdatePassword(BaseModel):
     old_password: Optional[str] = None
     new_password: str
 
+class UserUpdateDisplayName(BaseModel):
+    display_name: str
+
 class UserResponse(BaseModel):
     id: int
     username: str

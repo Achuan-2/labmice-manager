@@ -4,7 +4,9 @@ from typing import List, Optional
 
 from backend.app.auth_database import get_auth_db
 from backend.app.models.models import User
-from backend.app.schemas.schemas import UserLogin, UserCreate, UserResponse, UserUpdatePassword, Token
+from backend.app.schemas.schemas import (
+    Token, UserCreate, UserLogin, UserResponse, UserUpdateDisplayName, UserUpdatePassword,
+)
 from backend.app.auth import verify_password, get_password_hash, create_access_token, get_current_user, require_admin
 
 from sqlalchemy import func
@@ -95,6 +97,28 @@ def update_admin_password(admin_id: int, data: UserUpdatePassword, db: Session =
     target_user.hashed_password = get_password_hash(data.new_password)
     db.commit()
     return {"message": "密码修改成功"}
+
+@router.put("/admins/{admin_id}/display-name", response_model=UserResponse)
+def update_user_display_name(
+    admin_id: int,
+    data: UserUpdateDisplayName,
+    db: Session = Depends(get_auth_db),
+    current_user: User = Depends(require_admin),
+):
+    target_user = db.query(User).filter(User.id == admin_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="用户未找到")
+
+    display_name = data.display_name.strip()
+    if not display_name:
+        raise HTTPException(status_code=400, detail="用户名称不能为空")
+    if len(display_name) > 64:
+        raise HTTPException(status_code=400, detail="用户名称不能超过64个字符")
+
+    target_user.display_name = display_name
+    db.commit()
+    db.refresh(target_user)
+    return target_user
 
 @router.delete("/admins/{admin_id}")
 def delete_admin(admin_id: int, db: Session = Depends(get_auth_db), current_user: User = Depends(require_admin)):

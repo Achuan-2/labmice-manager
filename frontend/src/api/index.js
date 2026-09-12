@@ -37,6 +37,7 @@ export const authApi = {
   getMe: () => api.get('/auth/me'),
   listAdmins: () => api.get('/auth/admins'),
   createAdmin: (data) => api.post('/auth/admins', data),
+  updateAdminDisplayName: (id, data) => api.put(`/auth/admins/${id}/display-name`, data),
   updateAdminPassword: (id, data) => api.put(`/auth/admins/${id}/password`, data),
   deleteAdmin: (id) => api.delete(`/auth/admins/${id}`),
 }

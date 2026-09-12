@@ -78,9 +78,12 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <div class="flex items-center gap-1">
+              <el-button size="small" type="primary" link @click="openNameDialog(row)">
+                修改名称
+              </el-button>
               <el-button size="small" type="primary" link @click="openPasswordDialog(row)">
                 修改密码
               </el-button>
@@ -122,6 +125,25 @@
       <template #footer>
         <el-button @click="showAddDialog = false">取消</el-button>
         <el-button type="primary" :loading="creating" @click="submitAddAdmin">创建账号</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Update Display Name Dialog -->
+    <el-dialog v-model="showNameDialog" :title="`修改用户 [${currentAdmin?.username}] 名称`" width="400px">
+      <el-form :model="nameForm" label-width="80px" @submit.prevent="submitUpdateName">
+        <el-form-item label="用户名称" required>
+          <el-input
+            v-model="nameForm.display_name"
+            maxlength="64"
+            show-word-limit
+            placeholder="请输入用户名称"
+            @keyup.enter="submitUpdateName"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showNameDialog = false">取消</el-button>
+        <el-button type="primary" :loading="updatingName" @click="submitUpdateName">确认修改</el-button>
       </template>
     </el-dialog>
 
@@ -179,6 +201,11 @@ const addRules = {
 
 const showPasswordDialog = ref(false)
 const currentAdmin = ref(null)
+const showNameDialog = ref(false)
+const updatingName = ref(false)
+const nameForm = reactive({
+  display_name: ''
+})
 const passwordForm = reactive({
   new_password: ''
 })
@@ -245,6 +272,36 @@ function openPasswordDialog(admin) {
   currentAdmin.value = admin
   passwordForm.new_password = ''
   showPasswordDialog.value = true
+}
+
+function openNameDialog(admin) {
+  currentAdmin.value = admin
+  nameForm.display_name = admin.display_name || admin.username
+  showNameDialog.value = true
+}
+
+async function submitUpdateName() {
+  const displayName = nameForm.display_name.trim()
+  if (!displayName) {
+    ElMessage.warning('用户名称不能为空')
+    return
+  }
+  if (!currentAdmin.value || updatingName.value) return
+
+  updatingName.value = true
+  try {
+    await authApi.updateAdminDisplayName(currentAdmin.value.id, { display_name: displayName })
+    if (currentAdmin.value.id === authStore.user.id) {
+      await authStore.fetchMe()
+    }
+    await loadAdmins()
+    showNameDialog.value = false
+    ElMessage.success('用户名称已更新')
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '用户名称修改失败')
+  } finally {
+    updatingName.value = false
+  }
 }
 
 async function submitUpdatePassword() {
