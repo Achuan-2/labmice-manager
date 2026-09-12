@@ -1,16 +1,15 @@
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { settingsApi } from '@/api'
 
-const DEFAULT_GROUP_NAME = '课题组'
+const DEFAULT_SYSTEM_NAME = '课题组小鼠管理系统'
 
 export const useSettingsStore = defineStore('settings', () => {
-  const groupName = ref(DEFAULT_GROUP_NAME)
+  const systemName = ref(DEFAULT_SYSTEM_NAME)
   const loaded = ref(false)
-  const systemName = computed(() => `${groupName.value}小鼠管理系统`)
 
   function applySettings(settings) {
-    groupName.value = settings?.group_name?.trim() || DEFAULT_GROUP_NAME
+    systemName.value = settings?.system_name?.trim() || DEFAULT_SYSTEM_NAME
     document.title = systemName.value
   }
 
@@ -24,11 +23,11 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
-  async function update(groupNameValue) {
-    const settings = await settingsApi.update({ group_name: groupNameValue })
+  async function update(systemNameValue) {
+    const settings = await settingsApi.update({ system_name: systemNameValue })
     applySettings(settings)
     return settings
   }
 
-  return { groupName, systemName, loaded, load, update }
+  return { systemName, loaded, load, update }
 })

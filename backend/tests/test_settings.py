@@ -56,34 +56,42 @@ class SettingsApiTests(unittest.TestCase):
         response = self.client.get('/api/settings/public')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {
-            'group_name': '课题组',
             'system_name': '课题组小鼠管理系统',
             'transfer_rooms': ['东五', '东四'],
         })
 
         self.assertEqual(
-            self.client.put('/api/settings', json={'group_name': '其他实验室'}).status_code,
+            self.client.put('/api/settings', json={'system_name': '其他实验室'}).status_code,
             401,
         )
         updated = self.client.put(
             '/api/settings',
-            json={'group_name': '  神经环路课题组  '},
+            json={'system_name': '  动物资源平台  '},
             headers=self.admin_headers,
         )
         self.assertEqual(updated.status_code, 200)
-        self.assertEqual(updated.json()['group_name'], '神经环路课题组')
+        self.assertEqual(updated.json()['system_name'], '动物资源平台')
         self.assertEqual(
             self.client.get('/api/settings/public').json()['system_name'],
-            '神经环路课题组小鼠管理系统',
+            '动物资源平台',
         )
 
-    def test_rejects_blank_group_name(self):
+    def test_rejects_blank_system_name(self):
         response = self.client.put(
             '/api/settings',
-            json={'group_name': '   '},
+            json={'system_name': '   '},
             headers=self.admin_headers,
         )
         self.assertEqual(response.status_code, 422)
+
+    def test_uses_legacy_group_name_when_system_name_is_not_set(self):
+        with Session(self.engine) as db:
+            db.add(SystemSetting(key='group_name', value='神经环路课题组'))
+            db.commit()
+
+        response = self.client.get('/api/settings/public')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['system_name'], '神经环路课题组小鼠管理系统')
 
     def test_transfer_room_options_can_be_added_renamed_and_deleted(self):
         added = self.client.post(

@@ -3,21 +3,21 @@
     <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-4">
       <div class="text-base font-bold text-gray-800">系统名称设置</div>
       <div class="text-xs text-gray-500 mt-1 mb-4">
-        设置本课题组名称，登录页、侧栏和浏览器标题会自动同步；无需填写“小鼠管理系统”后缀
+        可设置完整的系统名称，登录页、侧栏和浏览器标题会自动同步
       </div>
-      <el-form v-if="authStore.isAdmin" inline @submit.prevent="saveGroupName">
-        <el-form-item label="课题组名称" class="mb-0">
+      <el-form v-if="authStore.isAdmin" inline @submit.prevent="saveSystemName">
+        <el-form-item label="系统名称" class="mb-0">
           <el-input
-            v-model="groupName"
+            v-model="systemName"
             maxlength="64"
             show-word-limit
-            placeholder=""
+            placeholder="请输入完整的系统名称"
             style="width: 320px; max-width: 100%"
-            @keyup.enter="saveGroupName"
+            @keyup.enter="saveSystemName"
           />
         </el-form-item>
         <el-form-item class="mb-0">
-          <el-button type="primary" :loading="savingSettings" @click="saveGroupName">保存名称</el-button>
+          <el-button type="primary" :loading="savingSettings" @click="saveSystemName">保存名称</el-button>
         </el-form-item>
       </el-form>
     </div>
@@ -152,10 +152,10 @@ import { ElMessage } from 'element-plus'
 
 const authStore = useAuthStore()
 const settingsStore = useSettingsStore()
-const groupName = ref(settingsStore.groupName)
+const systemName = ref(settingsStore.systemName)
 const savingSettings = ref(false)
-watch(() => settingsStore.groupName, value => {
-  if (!savingSettings.value) groupName.value = value
+watch(() => settingsStore.systemName, value => {
+  if (!savingSettings.value) systemName.value = value
 })
 
 const loading = ref(false)
@@ -200,16 +200,16 @@ async function loadAdmins() {
   }
 }
 
-async function saveGroupName() {
-  const cleanName = groupName.value.trim()
+async function saveSystemName() {
+  const cleanName = systemName.value.trim()
   if (!cleanName) {
-    ElMessage.warning('课题组名称不能为空')
+    ElMessage.warning('系统名称不能为空')
     return
   }
   savingSettings.value = true
   try {
     await settingsStore.update(cleanName)
-    groupName.value = settingsStore.groupName
+    systemName.value = settingsStore.systemName
     ElMessage.success('系统名称已更新')
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || '系统名称保存失败')
@@ -272,7 +272,7 @@ async function handleDeleteAdmin(id) {
 }
 
 onMounted(() => {
-  groupName.value = settingsStore.groupName
+  systemName.value = settingsStore.systemName
   loadAdmins()
 })
 </script>

@@ -11,7 +11,7 @@
           🐁
         </div>
         <div>
-          <div class="font-bold text-white text-base leading-tight">{{ settingsStore.groupName }}小鼠管理</div>
+          <div class="font-bold text-white text-base leading-tight">{{ settingsStore.systemName }}</div>
         </div>
       </div>
 

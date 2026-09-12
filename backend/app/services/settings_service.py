@@ -5,7 +5,9 @@ from sqlalchemy.orm import Session
 from backend.app.models.models import SystemSetting
 
 
-DEFAULT_GROUP_NAME = "课题组"
+DEFAULT_SYSTEM_NAME = "课题组小鼠管理系统"
+SYSTEM_NAME_KEY = "system_name"
+# 兼容升级前已经保存的课题组名称。
 GROUP_NAME_KEY = "group_name"
 DEFAULT_TRANSFER_ROOMS = ["东五", "东四"]
 TRANSFER_ROOMS_KEY = "transfer_rooms"
@@ -45,26 +47,30 @@ def set_transfer_rooms(db: Session, rooms: list[str]) -> list[str]:
     return normalized
 
 
-def get_group_name(db: Session) -> str:
-    setting = db.query(SystemSetting).filter(SystemSetting.key == GROUP_NAME_KEY).first()
-    return setting.value if setting and setting.value.strip() else DEFAULT_GROUP_NAME
+def get_system_name(db: Session) -> str:
+    setting = db.query(SystemSetting).filter(SystemSetting.key == SYSTEM_NAME_KEY).first()
+    if setting and setting.value.strip():
+        return setting.value.strip()
+
+    legacy_setting = db.query(SystemSetting).filter(SystemSetting.key == GROUP_NAME_KEY).first()
+    if legacy_setting and legacy_setting.value.strip():
+        return f"{legacy_setting.value.strip()}小鼠管理系统"
+    return DEFAULT_SYSTEM_NAME
 
 
 def get_public_settings(db: Session) -> dict:
-    group_name = get_group_name(db)
     return {
-        "group_name": group_name,
-        "system_name": f"{group_name}小鼠管理系统",
+        "system_name": get_system_name(db),
         "transfer_rooms": get_transfer_rooms(db),
     }
 
 
-def set_group_name(db: Session, group_name: str) -> dict:
-    clean_name = group_name.strip()
-    setting = db.query(SystemSetting).filter(SystemSetting.key == GROUP_NAME_KEY).first()
+def set_system_name(db: Session, system_name: str) -> dict:
+    clean_name = system_name.strip()
+    setting = db.query(SystemSetting).filter(SystemSetting.key == SYSTEM_NAME_KEY).first()
     if setting:
         setting.value = clean_name
     else:
-        db.add(SystemSetting(key=GROUP_NAME_KEY, value=clean_name))
+        db.add(SystemSetting(key=SYSTEM_NAME_KEY, value=clean_name))
     db.commit()
     return get_public_settings(db)

@@ -60,7 +60,7 @@
       </el-form>
 
       <div class="card-footer">
-        <p class="copyright-text">{{ settingsStore.groupName }} · 实验小鼠数字管理系统</p>
+        <p class="copyright-text">实验小鼠数字管理平台</p>
       </div>
     </div>
   </div>

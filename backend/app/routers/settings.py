@@ -8,7 +8,7 @@ from backend.app.auth import require_admin, require_auth
 from backend.app.auth_database import get_auth_db
 from backend.app.models.models import User
 from backend.app.services.settings_service import (
-    get_public_settings, get_transfer_rooms, set_group_name, set_transfer_rooms,
+    get_public_settings, get_transfer_rooms, set_system_name, set_transfer_rooms,
 )
 
 
@@ -16,14 +16,14 @@ router = APIRouter(prefix="/api/settings", tags=["Settings"])
 
 
 class SettingsUpdate(BaseModel):
-    group_name: Annotated[str, Field(min_length=1, max_length=64)]
+    system_name: Annotated[str, Field(min_length=1, max_length=64)]
 
-    @field_validator("group_name")
+    @field_validator("system_name")
     @classmethod
-    def validate_group_name(cls, value: str) -> str:
+    def validate_system_name(cls, value: str) -> str:
         clean_value = value.strip()
         if not clean_value:
-            raise ValueError("课题组名称不能为空")
+            raise ValueError("系统名称不能为空")
         return clean_value
 
 
@@ -50,7 +50,7 @@ def update_settings(
     db: Session = Depends(get_auth_db),
     current_user: User = Depends(require_admin),
 ):
-    return set_group_name(db, data.group_name)
+    return set_system_name(db, data.system_name)
 
 
 @router.post("/transfer-rooms")
