@@ -6,9 +6,13 @@ from sqlalchemy.orm import Session
 
 from backend.app.database import Base
 from backend.app.models.models import Cage, GenotypeRecord, Mouse, User
-from backend.app.routers.genotypes import create_genotype_records
+from backend.app.routers.genotypes import (
+    create_genotype_records,
+    delete_genotype_record,
+    update_genotype_record,
+)
 from backend.app.routers.mice import create_mouse, get_mouse_by_code
-from backend.app.schemas.schemas import GenotypeRecordCreate, MouseCreate
+from backend.app.schemas.schemas import GenotypeRecordCreate, GenotypeRecordUpdate, MouseCreate
 
 
 class GenotypeEntryTests(unittest.TestCase):
@@ -44,6 +48,29 @@ class GenotypeEntryTests(unittest.TestCase):
     def test_custom_values_override_archive(self):
         record, = self.save({'mouse_code': 'A1', 'strain': 'Custom', 'parents': 'New parents'})
         self.assertEqual((record.strain, record.parents), ('Custom', 'New parents'))
+
+    def test_edit_and_delete_keep_mouse_genotype_summary_linked(self):
+        older, = self.save({
+            'mouse_code': 'A1', 'test_date': '2026-09-01', 'genotype_1': 'WT'
+        })
+        latest, = self.save({
+            'mouse_code': 'A1', 'test_date': '2026-09-02', 'genotype_1': 'HET',
+            'op_record': 'Operator A', 'notes': 'first note'
+        })
+        mouse = self.db.query(Mouse).filter_by(mouse_code='A1').one()
+        self.assertEqual((mouse.genotype_1, mouse.test_date), ('HET', '2026-09-02'))
+
+        update_genotype_record(latest.id, GenotypeRecordUpdate(
+            test_date='2026-08-31', op_record='Operator B', notes='updated note'
+        ), self.db, self.admin)
+        self.db.refresh(mouse)
+        self.assertEqual((mouse.genotype_1, mouse.test_date), ('WT', '2026-09-01'))
+        updated = self.db.get(GenotypeRecord, latest.id)
+        self.assertEqual((updated.op_record, updated.notes), ('Operator B', 'updated note'))
+
+        delete_genotype_record(older.id, self.db, self.admin)
+        self.db.refresh(mouse)
+        self.assertEqual((mouse.genotype_1, mouse.test_date), ('HET', '2026-08-31'))
 
     def test_invalid_batch_rolls_back_records_and_mouse_sync(self):
         with self.assertRaises(HTTPException):

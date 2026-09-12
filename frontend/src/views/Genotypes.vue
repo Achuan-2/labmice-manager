@@ -103,6 +103,13 @@
           </template>
         </el-table-column>
 
+        <el-table-column prop="genotype_3" label="Genotype 3" width="130">
+          <template #default="{ row }">
+            <el-tag v-if="row.genotype_3" size="small" type="info">{{ row.genotype_3 }}</el-tag>
+            <span v-else class="text-gray-300 text-xs">-</span>
+          </template>
+        </el-table-column>
+
         <el-table-column prop="op_record" label="操作记录/人员" width="120">
           <template #default="{ row }">
             <span class="text-xs text-gray-500">{{ row.op_record || '-' }}</span>
@@ -192,6 +199,9 @@
         <el-form-item label="Genotype 2">
           <el-input v-model="form.genotype_2" placeholder="第二基因型结果 (选填)" />
         </el-form-item>
+        <el-form-item label="Genotype 3">
+          <el-input v-model="form.genotype_3" placeholder="第三基因型结果 (选填)" />
+        </el-form-item>
         <el-form-item label="操作人/记录">
           <el-input v-model="form.op_record" placeholder="操作人员简记" />
         </el-form-item>
@@ -254,6 +264,7 @@ const form = reactive({
   parents: '',
   genotype_1: '',
   genotype_2: '',
+  genotype_3: '',
   op_record: '',
   notes: ''
 })
@@ -360,6 +371,7 @@ function openAddDialog() {
     parents: '',
     genotype_1: '',
     genotype_2: '',
+    genotype_3: '',
     op_record: '',
     notes: ''
   })
@@ -377,6 +389,7 @@ function openEditDialog(row) {
     parents: row.parents || '',
     genotype_1: row.genotype_1 || '',
     genotype_2: row.genotype_2 || '',
+    genotype_3: row.genotype_3 || '',
     op_record: row.op_record || '',
     notes: row.notes || ''
   })

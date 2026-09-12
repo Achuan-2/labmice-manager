@@ -15,6 +15,24 @@ from sqlalchemy import or_, case
 
 router = APIRouter(prefix="/api/genotypes", tags=["Genotypes"])
 
+
+def _sync_mouse_genotype_summary(mouse: Optional[Mouse], db: Session) -> None:
+    """Keep the mouse archive summary aligned with its latest genotype record."""
+    if not mouse:
+        return
+    latest = (
+        db.query(GenotypeRecord)
+        .filter(or_(
+            GenotypeRecord.mouse_id == mouse.id,
+            GenotypeRecord.mouse_code == mouse.mouse_code,
+        ))
+        .order_by(GenotypeRecord.test_date.desc(), GenotypeRecord.id.desc())
+        .first()
+    )
+    mouse.genotype_1 = latest.genotype_1 if latest else None
+    mouse.genotype_2 = latest.genotype_2 if latest else None
+    mouse.test_date = latest.test_date if latest else None
+
 @router.get("")
 def list_genotypes(
     page: Optional[int] = None,
@@ -177,12 +195,10 @@ def _add_genotype_record(data, db, current_user):
 
     # Sync to mouse record
     if mouse:
-        if data.genotype_1 and not mouse.genotype_1:
-            mouse.genotype_1 = data.genotype_1
-        if data.genotype_2 and not mouse.genotype_2:
-            mouse.genotype_2 = data.genotype_2
         if data.gender and mouse.gender == "未知":
             mouse.gender = data.gender
+        db.flush()
+        _sync_mouse_genotype_summary(mouse, db)
 
     return gt
 
@@ -223,6 +239,9 @@ def update_genotype_record(
     for k, v in update_dict.items():
         setattr(gt, k, v)
 
+    db.flush()
+    mouse = gt.mouse or db.query(Mouse).filter(Mouse.mouse_code == gt.mouse_code).first()
+    _sync_mouse_genotype_summary(mouse, db)
     db.commit()
     db.refresh(gt)
     return gt
@@ -236,6 +255,9 @@ def delete_genotype_record(
     gt = db.query(GenotypeRecord).filter(GenotypeRecord.id == genotype_id).first()
     if not gt:
         raise HTTPException(status_code=404, detail="鉴定记录未找到")
+    mouse = gt.mouse or db.query(Mouse).filter(Mouse.mouse_code == gt.mouse_code).first()
     db.delete(gt)
+    db.flush()
+    _sync_mouse_genotype_summary(mouse, db)
     db.commit()
     return {"message": "鉴定记录已删除"}

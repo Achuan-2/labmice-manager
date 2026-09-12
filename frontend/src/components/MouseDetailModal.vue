@@ -2,7 +2,7 @@
   <el-dialog
     v-model="visible"
     :title="dialogTitle"
-    width="720px"
+    width="min(840px, 94vw)"
     destroy-on-close
     class="mouse-detail-modal"
   >
@@ -35,7 +35,7 @@
 
       <template v-if="mouse">
         <!-- EDIT FORM MODE -->
-        <div v-if="isEditing" class="p-1">
+        <div v-if="isEditing" class="archive-edit-form p-1">
           <div class="bg-blue-50 border border-blue-200 rounded-xl p-3 mb-4 text-xs text-blue-900 flex items-center justify-between">
             <div class="flex items-center gap-2">
               <span class="text-base">✏️</span>
@@ -45,7 +45,9 @@
           </div>
 
           <el-form :model="editForm" label-width="100px" size="default">
-            <div class="grid grid-cols-2 gap-x-4 gap-y-1">
+            <section class="archive-edit-section">
+              <div class="archive-edit-title"><span>🐁</span> 小鼠信息</div>
+              <div class="grid grid-cols-2 gap-x-4 gap-y-1">
               <el-form-item label="耳标编号" required>
                 <el-input v-model="editForm.mouse_code" :disabled="!mouse.id" placeholder="如 E962" />
               </el-form-item>
@@ -112,28 +114,6 @@
                 />
               </el-form-item>
 
-              <el-form-item label="主基因型">
-                <el-select
-                  v-model="editForm.genotype_1"
-                  filterable
-                  allow-create
-                  default-first-option
-                  placeholder="阳性/阴性/HET/WT"
-                  style="width: 100%"
-                  clearable
-                >
-                  <el-option label="阳性" value="阳性" />
-                  <el-option label="阴性" value="阴性" />
-                  <el-option label="杂合子 (HET)" value="杂合子" />
-                  <el-option label="纯合子 (HO)" value="纯合子" />
-                  <el-option label="野生型 (WT)" value="野生型" />
-                </el-select>
-              </el-form-item>
-
-              <el-form-item label="次基因型">
-                <el-input v-model="editForm.genotype_2" placeholder="可选输入次要鉴定结果" />
-              </el-form-item>
-
               <el-form-item label="所在鼠房">
                 <el-select
                   v-model="editForm.source_room"
@@ -152,6 +132,63 @@
                 <el-input v-model="editForm.cage_code" placeholder="如 7A, 05-1H" />
               </el-form-item>
 
+              <el-form-item label="档案备注" class="col-span-2">
+                <el-input
+                  v-model="editForm.notes"
+                  type="textarea"
+                  :rows="2"
+                  placeholder="记录该小鼠的其他重要信息或操作历史"
+                />
+              </el-form-item>
+              </div>
+            </section>
+
+            <section class="archive-edit-section">
+              <div class="archive-edit-title archive-edit-title--genotype">
+                <span>🔬</span>
+                <span>基因鉴定</span>
+                <span class="archive-edit-hint">与“基因鉴定结果”页使用同一份记录</span>
+                <el-button type="primary" link class="ml-auto" @click="addGenotypeEdit">+ 新增鉴定记录</el-button>
+              </div>
+
+              <div v-if="genotypeEdits.length" class="space-y-3">
+                <div v-for="(record, index) in genotypeEdits" :key="record._key" class="genotype-edit-card">
+                  <div class="genotype-edit-card__header">
+                    <span>鉴定记录 {{ index + 1 }}</span>
+                    <el-tag v-if="record.id" size="small" type="info" effect="plain">已有记录</el-tag>
+                    <el-tag v-else size="small" type="success" effect="plain">新增记录</el-tag>
+                    <el-button v-if="!record.id" type="danger" link class="ml-auto" @click="removeGenotypeEdit(index)">移除</el-button>
+                  </div>
+                  <div class="grid grid-cols-2 gap-x-4 gap-y-1">
+                    <el-form-item label="鉴定日期">
+                      <el-date-picker v-model="record.test_date" type="date" value-format="YYYY-MM-DD" placeholder="选择鉴定日期" style="width: 100%" />
+                    </el-form-item>
+                    <el-form-item label="操作人">
+                      <el-input v-model="record.op_record" placeholder="操作人员简记" />
+                    </el-form-item>
+                    <el-form-item label="Genotype 1">
+                      <el-input v-model="record.genotype_1" placeholder="如 阳性、WT、HET" />
+                    </el-form-item>
+                    <el-form-item label="Genotype 2">
+                      <el-input v-model="record.genotype_2" placeholder="选填" />
+                    </el-form-item>
+                    <el-form-item label="Genotype 3">
+                      <el-input v-model="record.genotype_3" placeholder="选填" />
+                    </el-form-item>
+                    <el-form-item label="鉴定备注">
+                      <el-input v-model="record.notes" type="textarea" :rows="2" placeholder="基因鉴定备注" />
+                    </el-form-item>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="text-xs text-gray-400 text-center py-4 border border-dashed border-gray-200 rounded-lg">
+                暂无基因鉴定记录，可点击“新增鉴定记录”录入
+              </div>
+            </section>
+
+            <section class="archive-edit-section">
+              <div class="archive-edit-title"><span>👤</span> 领取信息</div>
+              <div class="grid grid-cols-2 gap-x-4 gap-y-1">
               <el-form-item label="当前领取人">
                 <el-select
                   v-model="editForm.owner_name"
@@ -196,15 +233,8 @@
                 <el-input v-model="editForm.claim_purpose" placeholder="如: 行为学实验、膜片钳记录等" />
               </el-form-item>
 
-              <el-form-item label="档案备注" class="col-span-2">
-                <el-input
-                  v-model="editForm.notes"
-                  type="textarea"
-                  :rows="2"
-                  placeholder="记录该小鼠的其他重要信息或操作历史"
-                />
-              </el-form-item>
-            </div>
+              </div>
+            </section>
           </el-form>
         </div>
 
@@ -473,7 +503,7 @@
 
 <script setup>
 import { ref, reactive, computed, watch } from 'vue'
-import { miceApi, cagesApi, claimersApi, mouseStatusesApi } from '@/api'
+import { miceApi, cagesApi, claimersApi, mouseStatusesApi, genotypesApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { useClaimerColors } from '@/composables/useClaimerColors'
 import { ElMessage } from 'element-plus'
@@ -538,6 +568,8 @@ const saveLoading = ref(false)
 const editStrainOptions = ref([])
 const editRoomOptions = ref([])
 const editClaimerOptions = ref([])
+const genotypeEdits = ref([])
+let genotypeEditKey = 0
 
 const ALL_STATUSES = ref([])
 
@@ -548,8 +580,6 @@ const editForm = reactive({
   status: '在笼',
   dob: '',
   parents: '',
-  genotype_1: '',
-  genotype_2: '',
   source_room: '',
   cage_code: '',
   owner_name: '',
@@ -590,8 +620,6 @@ function startEdit() {
     status: mouse.value.id ? (mouse.value.status || '在笼') : '在笼',
     dob: mouse.value.dob || '',
     parents: mouse.value.parents || '',
-    genotype_1: mouse.value.genotype_1 || '',
-    genotype_2: mouse.value.genotype_2 || '',
     source_room: mouse.value.cage_room || mouse.value.source_room || '',
     cage_code: mouse.value.cage_code || '',
     owner_name: mouse.value.owner_name || '',
@@ -599,8 +627,66 @@ function startEdit() {
     claim_purpose: mouse.value.claim_purpose || '',
     notes: mouse.value.notes || ''
   })
+  genotypeEdits.value = (mouse.value.genotypes || []).map(record => ({
+    id: record.id,
+    _key: `existing-${record.id}`,
+    test_date: record.test_date || '',
+    genotype_1: record.genotype_1 || '',
+    genotype_2: record.genotype_2 || '',
+    genotype_3: record.genotype_3 || '',
+    op_record: record.op_record || '',
+    notes: record.notes || ''
+  }))
+  if (!genotypeEdits.value.length && (mouse.value.genotype_1 || mouse.value.genotype_2 || mouse.value.test_date)) {
+    genotypeEdits.value.push(createEmptyGenotypeEdit({
+      test_date: mouse.value.test_date || '',
+      genotype_1: mouse.value.genotype_1 || '',
+      genotype_2: mouse.value.genotype_2 || ''
+    }))
+  }
   isEditing.value = true
   loadEditOptions()
+}
+
+function createEmptyGenotypeEdit(values = {}) {
+  genotypeEditKey += 1
+  return {
+    id: null,
+    _key: `new-${genotypeEditKey}`,
+    test_date: '',
+    genotype_1: '',
+    genotype_2: '',
+    genotype_3: '',
+    op_record: '',
+    notes: '',
+    ...values
+  }
+}
+
+function addGenotypeEdit() {
+  genotypeEdits.value.push(createEmptyGenotypeEdit())
+}
+
+function removeGenotypeEdit(index) {
+  genotypeEdits.value.splice(index, 1)
+}
+
+function hasGenotypeContent(record) {
+  return Boolean(
+    record.id || record.test_date || record.genotype_1 || record.genotype_2 ||
+    record.genotype_3 || record.op_record || record.notes
+  )
+}
+
+function genotypePayload(record) {
+  return {
+    test_date: record.test_date || null,
+    genotype_1: record.genotype_1 || null,
+    genotype_2: record.genotype_2 || null,
+    genotype_3: record.genotype_3 || null,
+    op_record: record.op_record || null,
+    notes: record.notes || null
+  }
 }
 
 function cancelEdit() {
@@ -614,6 +700,7 @@ async function saveEdit() {
     return
   }
   saveLoading.value = true
+  let archiveSaved = false
   try {
     const payload = {
       mouse_code: editForm.mouse_code.trim(),
@@ -622,8 +709,6 @@ async function saveEdit() {
       status: editForm.status,
       dob: editForm.dob || undefined,
       parents: editForm.parents || undefined,
-      genotype_1: editForm.genotype_1 || undefined,
-      genotype_2: editForm.genotype_2 || undefined,
       source_room: editForm.source_room || undefined,
       cage_code: editForm.cage_code || undefined,
       owner_name: editForm.owner_name || undefined,
@@ -634,13 +719,35 @@ async function saveEdit() {
     const res = mouse.value.id
       ? await miceApi.updateMouse(mouse.value.id, payload)
       : await miceApi.createMouse({ ...payload, test_date: mouse.value.test_date || undefined })
+    archiveSaved = true
     mouse.value = res
+
+    const recordsToSave = genotypeEdits.value.filter(hasGenotypeContent)
+    for (const record of recordsToSave) {
+      const recordPayload = genotypePayload(record)
+      if (record.id) {
+        await genotypesApi.updateGenotype(record.id, recordPayload)
+      } else {
+        const created = await genotypesApi.createGenotype({
+          ...recordPayload,
+          mouse_code: res.mouse_code,
+          strain: res.strain || '',
+          dob: res.dob || null,
+          gender: res.gender || null,
+          parents: res.parents || null
+        })
+        Object.assign(record, created, { _key: `existing-${created.id}` })
+      }
+    }
+
+    await fetchMouseData(res.mouse_code, res.id)
     ElMessage.success(`小鼠 [${res.mouse_code}] 档案已成功更新`)
     isEditing.value = false
-    emit('updated', res)
+    emit('updated', mouse.value)
     emit('refresh')
   } catch (e) {
-    ElMessage.error(e.response?.data?.detail || '保存小鼠档案失败')
+    const fallback = archiveSaved ? '小鼠信息已保存，但基因鉴定记录保存失败，请重试' : '保存小鼠档案失败'
+    ElMessage.error(e.response?.data?.detail || fallback)
   } finally {
     saveLoading.value = false
   }
@@ -767,6 +874,7 @@ watch(() => props.modelValue, (newVal) => {
     loadData()
   } else {
     mouse.value = null
+    genotypeEdits.value = []
     navHistory.value = []
     isEditing.value = false
   }
@@ -799,5 +907,56 @@ function handleSetOwner() {
 <style scoped>
 .mouse-detail-body {
   min-height: 180px;
+}
+
+.archive-edit-form {
+  max-height: calc(100vh - 190px);
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.archive-edit-section {
+  margin-bottom: 14px;
+  padding: 14px 14px 4px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.archive-edit-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 12px;
+  color: #374151;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.archive-edit-title--genotype {
+  color: #047857;
+}
+
+.archive-edit-hint {
+  color: #9ca3af;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.genotype-edit-card {
+  padding: 10px 12px 2px;
+  border: 1px solid #d1fae5;
+  border-radius: 10px;
+  background: #f0fdf4;
+}
+
+.genotype-edit-card__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: #065f46;
+  font-size: 12px;
+  font-weight: 700;
 }
 </style>

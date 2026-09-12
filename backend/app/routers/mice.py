@@ -83,36 +83,35 @@ def enrich_mouse_response(m: Mouse, db: Optional[Session] = None) -> Dict[str, A
 
     # Genotype history for this mouse
     gt_list = []
-    if m.genotype_records:
-        for g in m.genotype_records:
-            gt_list.append({
-                "id": g.id,
-                "mouse_code": g.mouse_code,
-                "test_date": g.test_date,
-                "strain": g.strain,
-                "parents": g.parents or m.parents,
-                "genotype_1": g.genotype_1,
-                "genotype_2": g.genotype_2,
-                "genotype_3": g.genotype_3,
-                "op_record": g.op_record,
-                "notes": g.notes
-            })
-    elif db:
-        # Fallback search by mouse_code
-        records = db.query(GenotypeRecord).filter(GenotypeRecord.mouse_code == m.mouse_code).all()
-        for g in records:
-            gt_list.append({
-                "id": g.id,
-                "mouse_code": g.mouse_code,
-                "test_date": g.test_date,
-                "strain": g.strain,
-                "parents": g.parents or m.parents,
-                "genotype_1": g.genotype_1,
-                "genotype_2": g.genotype_2,
-                "genotype_3": g.genotype_3,
-                "op_record": g.op_record,
-                "notes": g.notes
-            })
+    if db:
+        records = (
+            db.query(GenotypeRecord)
+            .filter(or_(
+                GenotypeRecord.mouse_id == m.id,
+                GenotypeRecord.mouse_code == m.mouse_code,
+            ))
+            .order_by(GenotypeRecord.test_date.desc(), GenotypeRecord.id.desc())
+            .all()
+        )
+    else:
+        records = sorted(
+            m.genotype_records or [],
+            key=lambda g: (g.test_date or "", g.id or 0),
+            reverse=True,
+        )
+    for g in records:
+        gt_list.append({
+            "id": g.id,
+            "mouse_code": g.mouse_code,
+            "test_date": g.test_date,
+            "strain": g.strain,
+            "parents": g.parents or m.parents,
+            "genotype_1": g.genotype_1,
+            "genotype_2": g.genotype_2,
+            "genotype_3": g.genotype_3,
+            "op_record": g.op_record,
+            "notes": g.notes
+        })
 
     # Transfer logs
     transfer_logs = []
