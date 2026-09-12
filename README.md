@@ -2,6 +2,9 @@
 
 专为生物实验室/课题组定制的小鼠管理与流转联动系统。系统深度整合**小鼠档案**、**笼位分布**、**转鼠需求及反馈**、**基因型鉴定结果**、**课题组领取人**，全站实施安全登录保护，支持 Docker 在线部署。
 
+![](https://fastly.jsdelivr.net/gh/Achuan-2/PicBed/assets/20260913001015-2026-09-13.png)
+
+![](https://fastly.jsdelivr.net/gh/Achuan-2/PicBed/assets/PixPin_2026-09-12_18-25-19-20260912182524-48dg47a-2026-09-13.png)![](https://fastly.jsdelivr.net/gh/Achuan-2/PicBed/assets/20260913001008-2026-09-13.png)
 ---
 
 ## 🌟 核心功能特性
