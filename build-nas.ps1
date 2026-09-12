@@ -86,6 +86,7 @@ Copy-SourceTree -Name 'frontend'
 
 $deploymentFiles = @(
     'Dockerfile',
+    'docker-entrypoint.sh',
     'docker-compose.yml',
     '.dockerignore',
     '.env.example',

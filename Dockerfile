@@ -25,6 +25,7 @@ ENV PYTHONUNBUFFERED=1 \
 # 安装基础依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # 安装 uv 高速包管理器
@@ -37,13 +38,18 @@ RUN cd backend && uv sync --frozen --no-dev --no-install-project
 # 拷贝后端代码
 COPY backend/ ./backend/
 
+# 容器先以 root 修正 NAS bind mount 权限，随后立即降权运行应用。
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh
+
 # 拷贝已编译好的前端静态文件
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 # 挂载数据持久化目录 (SQLite 数据库及上传文件)
 RUN groupadd --gid 10001 mouse && useradd --uid 10001 --gid mouse --no-create-home mouse \
-    && mkdir -p /app/data && chown -R mouse:mouse /app/data
-USER 10001:10001
+    && mkdir -p /app/data /app/excel \
+    && chown -R mouse:mouse /app/data \
+    && chmod -R a+rX /app/excel
 VOLUME ["/app/data"]
 
 EXPOSE 8000
@@ -52,4 +58,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
     CMD ["/app/backend/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)"]
 
 # 启动命令
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["/app/backend/.venv/bin/uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]

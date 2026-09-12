@@ -11,7 +11,7 @@ from backend.app.auth_database import get_auth_db
 from backend.app.models.models import User
 
 # JWT Configuration
-SECRET_KEY = os.getenv("SECRET_KEY", "yuanpeng-lab-mouse-secret-key-2026")
+SECRET_KEY = os.getenv("SECRET_KEY", "mouse-secret-key-2026")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 

@@ -71,7 +71,7 @@
      --restart unless-stopped \
      -p 8000:8000 \
      -v "$(pwd)/data:/app/data" \
-     -v "$(pwd)/excel:/app/excel:ro" \
+     -v "$(pwd)/excel:/app/excel" \
      -e SECRET_KEY="请替换为随机长密钥" \
      -e ADMIN_PASSWORD="请替换为初始管理员密码" \
      -e TZ="Asia/Shanghai" \
@@ -80,6 +80,7 @@
 
 4. 浏览器访问 `http://服务器IP:8000`。群晖 NAS 用户也可以在 **Container Manager** 的注册表中搜索 `achuan1037/mouse-manager` 并下载 `latest` 镜像，然后按上述端口、文件夹映射和环境变量创建容器。
 
-数据持久化存放在宿主机的 `data` 目录：`mouse-manager.db` 保存小鼠业务数据，`accounts.db` 单独保存账号和密码哈希。完整备份需同时保留这两个数据库，最简单的方式是备份整个 `data` 文件夹；网站内的数据库导出/恢复仅处理小鼠业务数据库，不会覆盖账号。
+容器启动时会自动为 `data` 设置 `10001:10001` 所有权和写权限，并为 `excel` 补充读取权限，随后降权为 `10001:10001` 运行网站。因此在群晖 Container Manager 中只需选择两个宿主机文件夹，不要额外填写“用户”或把 `excel` 映射设为只读；无需再手动执行 `chown`、`chmod`。业务进程仍以非 root 用户运行。
 
+数据持久化存放在宿主机的 `data` 目录：`mouse-manager.db` 保存小鼠业务数据，`accounts.db` 单独保存账号和密码哈希。完整备份需同时保留这两个数据库，最简单的方式是备份整个 `data` 文件夹；网站内的数据库导出/恢复仅处理小鼠业务数据库，不会覆盖账号。
 
