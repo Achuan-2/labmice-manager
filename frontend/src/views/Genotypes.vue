@@ -37,7 +37,13 @@
     <!-- Genotype Table -->
     <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
       <el-table v-loading="loading" :data="genotypes" stripe style="width: 100%">
-        <el-table-column prop="test_date" label="测试日期" width="110">
+        <el-table-column prop="dob" label="出生日期" width="110">
+          <template #default="{ row }">
+            <span class="font-mono text-xs text-gray-600">{{ row.dob || '-' }}</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="test_date" label="鉴定日期" width="110">
           <template #default="{ row }">
             <span class="font-mono text-xs text-gray-600">{{ row.test_date || '-' }}</span>
           </template>
@@ -68,12 +74,6 @@
             <span v-if="row.gender === 'M'" class="text-blue-500 font-bold">♂ 雄</span>
             <span v-else-if="row.gender === 'F'" class="text-pink-500 font-bold">♀ 雌</span>
             <span v-else class="text-gray-400 text-xs">-</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="dob" label="出生日期" width="110">
-          <template #default="{ row }">
-            <span class="font-mono text-xs text-gray-600">{{ row.dob || '-' }}</span>
           </template>
         </el-table-column>
 
@@ -175,8 +175,8 @@
         <el-form-item v-else label="耳标编号" required>
           <el-input v-model="form.mouse_code" disabled />
         </el-form-item>
-        <el-form-item label="测试日期">
-          <el-date-picker v-model="form.test_date" type="date" value-format="YYYY-MM-DD" placeholder="选择测试日期" style="width: 100%" />
+        <el-form-item v-if="isEdit || !isBatchEntry" label="出生日期">
+          <el-date-picker v-model="form.dob" type="date" value-format="YYYY-MM-DD" placeholder="选择小鼠出生日期" style="width: 100%" @change="manualFields.add('dob')" />
         </el-form-item>
         <el-form-item label="品系">
           <el-select v-model="form.strain" filterable allow-create default-first-option clearable placeholder="选择品系或输入自定义品系" style="width: 100%" @change="manualFields.add('strain')">
@@ -192,6 +192,9 @@
         </el-form-item>
         <el-form-item label="父母系谱">
           <el-input v-model="form.parents" placeholder="如 E925M+E822F、E824F" @input="manualFields.add('parents')" />
+        </el-form-item>
+        <el-form-item label="鉴定日期">
+          <el-date-picker v-model="form.test_date" type="date" value-format="YYYY-MM-DD" placeholder="选择鉴定日期" style="width: 100%" />
         </el-form-item>
         <el-form-item label="Genotype 1">
           <el-input v-model="form.genotype_1" placeholder="如 阳性, 野生型, 杂合子, 纯合子, HET" />
@@ -226,7 +229,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { genotypesApi, miceApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import MouseDetailModal from '@/components/MouseDetailModal.vue'
@@ -259,6 +262,7 @@ const manualFields = new Set()
 const form = reactive({
   mouse_code: '',
   test_date: '',
+  dob: '',
   strain: '',
   gender: '',
   parents: '',
@@ -273,6 +277,17 @@ function parseCodes(value) {
   return [...new Set(value.split(/[,，、\n]+/).map(code => code.trim()).filter(Boolean))]
 }
 
+const isBatchEntry = computed(() => (
+  !isEdit.value && (addCount.value > 1 || parseCodes(form.mouse_code).length > 1)
+))
+
+watch(isBatchEntry, (batch) => {
+  if (batch) {
+    form.dob = ''
+    manualFields.delete('dob')
+  }
+})
+
 function updateGeneratedMouseCodes() {
   form.mouse_code = generateSequentialMouseCodes(startCode.value, addCount.value).join(', ')
 }
@@ -280,7 +295,7 @@ function updateGeneratedMouseCodes() {
 watch(() => [form.mouse_code, showDialog.value], ([value, visible], _, onCleanup) => {
   lookupLoading.value = false
   if (!visible || isEdit.value) return
-  for (const field of ['strain', 'parents', 'gender']) {
+  for (const field of ['strain', 'parents', 'gender', 'dob']) {
     if (!manualFields.has(field)) form[field] = ''
   }
   const codes = parseCodes(value)
@@ -302,7 +317,10 @@ watch(() => [form.mouse_code, showDialog.value], ([value, visible], _, onCleanup
         }
       }))
       if (cancelled) return
-      for (const field of ['strain', 'parents', 'gender']) {
+      const lookupFields = codes.length > 1
+        ? ['strain', 'parents', 'gender']
+        : ['strain', 'parents', 'gender', 'dob']
+      for (const field of lookupFields) {
         const values = mice.map(mouse => mouse?.[field] || '')
         if (!manualFields.has(field)) {
           form[field] = values.every(value => value === values[0]) ? values[0] : ''
@@ -366,6 +384,7 @@ function openAddDialog() {
   Object.assign(form, {
     mouse_code: '',
     test_date: new Date().toISOString().split('T')[0],
+    dob: '',
     strain: '',
     gender: '',
     parents: '',
@@ -384,6 +403,7 @@ function openEditDialog(row) {
   Object.assign(form, {
     mouse_code: row.mouse_code,
     test_date: row.test_date || '',
+    dob: row.dob || '',
     strain: row.strain || '',
     gender: row.gender || 'M',
     parents: row.parents || '',

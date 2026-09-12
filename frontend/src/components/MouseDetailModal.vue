@@ -398,7 +398,7 @@
                 class="border border-gray-200 bg-white rounded-lg p-2.5 text-xs space-y-1 shadow-2xs"
               >
                 <div class="flex items-center justify-between">
-                  <span class="font-mono text-gray-600 font-medium">📅 测试日期: {{ gt.test_date || '未记录' }}</span>
+                  <span class="font-mono text-gray-600 font-medium">📅 鉴定日期: {{ gt.test_date || '未记录' }}</span>
                   <div class="flex gap-1">
                     <el-tag size="small" type="success">{{ gt.genotype_1 || '已鉴定' }}</el-tag>
                     <el-tag v-if="gt.genotype_2" size="small" type="warning">{{ gt.genotype_2 }}</el-tag>
@@ -417,7 +417,7 @@
             </div>
             <div v-else-if="mouse.genotype_1" class="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs text-gray-600 flex justify-between items-center">
               <span>记录基因型: <b class="text-emerald-700">{{ mouse.genotype_1 }}</b> <span v-if="mouse.genotype_2">/ {{ mouse.genotype_2 }}</span></span>
-              <span class="text-gray-400 font-mono">{{ mouse.test_date || '测试日期未详' }}</span>
+              <span class="text-gray-400 font-mono">{{ mouse.test_date || '鉴定日期未详' }}</span>
             </div>
             <div v-else class="text-xs text-gray-400 text-center py-3 bg-gray-50 rounded-lg border border-dashed border-gray-200">
               暂无该小鼠的 PCR 基因鉴定记录
