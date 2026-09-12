@@ -236,6 +236,19 @@ class CageBase(BaseModel):
 class CageCreate(CageBase):
     pass
 
+
+class CageBatchCreate(BaseModel):
+    cage_codes: List[str]
+    room: Optional[str] = "默认鼠房"
+    strain: Optional[str] = ""
+    gender: Optional[str] = "M"
+    capacity: Optional[int] = 5
+    mating_date: Optional[str] = None
+    litter_birth_date: Optional[str] = None
+    litter_birth_dates: Optional[List[str]] = None
+    observation: Optional[str] = None
+    notes: Optional[str] = None
+
 class CageUpdate(BaseModel):
     cage_code: Optional[str] = None
     room: Optional[str] = None

@@ -83,6 +83,7 @@ export const cagesApi = {
   deleteRoom: (name) => api.delete(`/cages/rooms/${encodeURIComponent(name)}`),
   getCage: (id) => api.get(`/cages/${id}`),
   createCage: (data) => api.post('/cages', data),
+  batchCreateCages: (data) => api.post('/cages/batch', data),
   updateCage: (id, data) => api.put(`/cages/${id}`, data),
   deleteCage: (id) => api.delete(`/cages/${id}`),
 }

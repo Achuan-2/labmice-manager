@@ -219,8 +219,16 @@
             <el-option v-for="r in roomOptions" :key="r" :label="r" :value="r" />
           </el-select>
         </el-form-item>
-        <el-form-item label="笼位号" required>
-          <el-input v-model="cageForm.cage_code" placeholder="如 7A, 05-1H, H9" />
+        <el-form-item :label="isEdit ? '笼位号' : '笼位编号'" required>
+          <el-input
+            v-model="cageForm.cage_code"
+            :type="isEdit ? 'text' : 'textarea'"
+            :rows="isEdit ? undefined : 3"
+            :placeholder="isEdit ? '如 7A' : '可输入多个编号，如：8A，10A，20A'"
+          />
+          <div v-if="!isEdit" class="text-xs text-gray-500 mt-1">
+            支持中文/英文逗号、顿号、空格或换行分隔；当前识别 {{ parsedNewCageCodes.length }} 个笼位。
+          </div>
         </el-form-item>
         <el-form-item label="品系">
           <StrainSelect v-model="cageForm.strain" />
@@ -354,7 +362,7 @@
       </section>
       <template #footer>
         <el-button :disabled="cageMouseBusy" @click="showCageDialog = false">{{ isEdit ? '关闭' : '取消' }}</el-button>
-        <el-button type="primary" :disabled="cageMouseBusy" @click="submitCageForm">保存笼位信息</el-button>
+        <el-button type="primary" :loading="cageSaving" :disabled="cageMouseBusy" @click="submitCageForm">{{ isEdit ? '保存笼位信息' : '新增笼位' }}</el-button>
       </template>
     </el-dialog>
 
@@ -1129,6 +1137,12 @@ const cageForm = reactive({
   notes: ''
 })
 
+const cageSaving = ref(false)
+const parsedNewCageCodes = computed(() => [...new Set(String(cageForm.cage_code || '')
+  .split(/[,，、\s]+/)
+  .map(code => code.trim())
+  .filter(Boolean))])
+
 const filteredCages = computed(() => {
   return cagesList.value.filter(c => {
     if (activeCategory.value && roomCategory(c.room) !== activeCategory.value) return false
@@ -1400,10 +1414,12 @@ function openEditCageDialog(cage) {
 }
 
 async function submitCageForm() {
-  if (!cageForm.cage_code) {
-    ElMessage.warning('请输入笼位号')
+  const newCageCodes = parsedNewCageCodes.value
+  if (isEdit.value ? !cageForm.cage_code.trim() : newCageCodes.length === 0) {
+    ElMessage.warning('请输入笼位编号')
     return
   }
+  cageSaving.value = true
   try {
     if (isEdit.value) {
       try {
@@ -1425,14 +1441,17 @@ async function submitCageForm() {
         ElMessage.success('笼位已合并，两笼小鼠已归入目标笼位，原笼位已保留为空笼')
       }
     } else {
-      await cagesApi.createCage(cageForm)
-      ElMessage.success('笼位创建成功')
+      const { cage_code, ...sharedFields } = cageForm
+      const result = await cagesApi.batchCreateCages({ ...sharedFields, cage_codes: newCageCodes })
+      ElMessage.success(result.message || `成功新增 ${newCageCodes.length} 个笼位`)
     }
     showCageDialog.value = false
     loadCages()
     loadRooms()
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || '保存失败')
+  } finally {
+    cageSaving.value = false
   }
 }
 

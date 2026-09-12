@@ -6,7 +6,7 @@ from sqlalchemy import func
 
 from backend.app.database import get_db
 from backend.app.models.models import Cage, Mouse, User, Room
-from backend.app.schemas.schemas import CageCreate, CageUpdate, CageResponse, CageDetailResponse, RoomCreate
+from backend.app.schemas.schemas import CageBatchCreate, CageCreate, CageUpdate, CageResponse, CageDetailResponse, RoomCreate
 from backend.app.routers.mice import enrich_mouse_response
 from backend.app.auth import require_auth, require_admin
 
@@ -230,6 +230,60 @@ def create_cage(data: CageCreate, db: Session = Depends(get_db), current_user: U
     db.commit()
     db.refresh(cage)
     return CageResponse.model_validate(cage)
+
+
+@router.post("/batch")
+def batch_create_cages(
+    data: CageBatchCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    clean_room = data.room.strip() if data.room else "默认鼠房"
+    clean_codes = []
+    for raw_code in data.cage_codes:
+        code = str(raw_code or "").strip()
+        if not code:
+            continue
+        if len(code) > 64:
+            raise HTTPException(status_code=400, detail=f"笼位编号 [{code}] 不能超过 64 个字符")
+        if code not in clean_codes:
+            clean_codes.append(code)
+    if not clean_codes:
+        raise HTTPException(status_code=400, detail="请至少输入一个笼位编号")
+    if len(clean_codes) > 100:
+        raise HTTPException(status_code=400, detail="每次最多批量新增 100 个笼位")
+
+    existing_codes = [row[0] for row in db.query(Cage.cage_code).filter(
+        Cage.room == clean_room,
+        Cage.cage_code.in_(clean_codes),
+    ).all()]
+    if existing_codes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"鼠房 [{clean_room}] 中已存在笼位：{', '.join(existing_codes)}",
+        )
+
+    litter_birth_dates = normalize_litter_birth_dates(data.litter_birth_dates, data.litter_birth_date)
+    cages = [Cage(
+        cage_code=code,
+        room=clean_room,
+        strain=data.strain or "",
+        gender=data.gender or "M",
+        capacity=data.capacity or 5,
+        mating_date=data.mating_date,
+        litter_birth_date=litter_birth_dates[0] if litter_birth_dates else None,
+        litter_birth_dates=litter_birth_dates,
+        observation=data.observation,
+        notes=data.notes,
+    ) for code in clean_codes]
+    db.add_all(cages)
+    db.commit()
+    return {
+        "success": True,
+        "created_count": len(cages),
+        "cage_codes": clean_codes,
+        "message": f"成功新增 {len(cages)} 个笼位",
+    }
 
 @router.put("/{cage_id}")
 def update_cage(cage_id: int, data: CageUpdate, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
