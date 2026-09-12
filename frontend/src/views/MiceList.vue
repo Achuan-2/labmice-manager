@@ -413,18 +413,22 @@
     </el-dialog>
 
     <!-- Add Mouse Dialog -->
-    <el-dialog v-model="showAddMouseDialog" title="录入新小鼠 (支持批量)" width="570px">
+    <el-dialog v-model="showAddMouseDialog" title="录入新小鼠 (支持批量)" width="570px" align-center>
       <el-form :model="mouseForm" label-width="110px">
-        <el-form-item label="耳标编号" required>
+        <el-form-item label="新增数量" required>
+          <el-input-number v-model="mouseForm.add_count" :min="1" :max="100" @change="updateMouseCodes" />
+        </el-form-item>
+        <el-form-item label="起始编号" required>
+          <el-input v-model="mouseForm.start_code" placeholder="如 Z100" @input="updateMouseCodes" />
+          <div class="text-xs text-gray-500">起始编号包含在本批内；输入 Z100、新增 5 只，将生成 Z100 至 Z104。</div>
+        </el-form-item>
+        <el-form-item label="编号列表" required>
           <el-input
             v-model="mouseForm.mouse_code"
             type="textarea"
             :rows="2"
-            placeholder="可输入单个耳标如 H233，或多个耳标（用空格、中英文逗号隔开，如: H301, H302 H303，H304）支持批量录入"
+            placeholder="自动生成后仍可手动调整，多个编号用空格或中英文逗号分隔"
           />
-          <div v-if="detectedCodesCount > 1" class="mt-1 text-xs text-blue-600 font-medium flex items-center gap-1">
-            <span>✨ 已检测到 <b>{{ detectedCodesCount }}</b> 只小鼠耳标，保存将自动批量录入！</span>
-          </div>
         </el-form-item>
         <el-form-item label="品系/基因" required>
           <el-select
@@ -606,6 +610,7 @@ import MouseDetailModal from '@/components/MouseDetailModal.vue'
 import MouseStatusManager from '@/components/MouseStatusManager.vue'
 import CageDetailDialog from '@/components/CageDetailDialog.vue'
 import { isClaimedOutOfCage, mouseStatusLabel } from '@/utils/mouseDisplay'
+import { generateSequentialMouseCodes } from '@/utils/mouseCodes'
 import PedigreeTags from '@/components/PedigreeTags.vue'
 import { ElMessage } from 'element-plus'
 
@@ -685,6 +690,8 @@ const transferForm = reactive({
 })
 
 const mouseForm = reactive({
+  add_count: 1,
+  start_code: '',
   mouse_code: '',
   strain: '',
   gender: 'M',
@@ -937,6 +944,8 @@ async function handleBatchStatus(status) {
 
 function openAddMouseDialog() {
   Object.assign(mouseForm, {
+    add_count: 1,
+    start_code: '',
     mouse_code: '',
     strain: '',
     gender: 'M',
@@ -951,6 +960,10 @@ function openAddMouseDialog() {
   })
   parentsDetection.value = null
   showAddMouseDialog.value = true
+}
+
+function updateMouseCodes() {
+  mouseForm.mouse_code = generateSequentialMouseCodes(mouseForm.start_code, mouseForm.add_count).join(', ')
 }
 
 function openEditDialog(row) {
@@ -1012,10 +1025,8 @@ async function submitAddMouseForm() {
         ElMessage.warning('请输入小鼠耳标编号')
         return
       }
-      const res = await miceApi.createMouse({
-        ...mouseForm,
-        mouse_code: singleCode
-      })
+      const { add_count, start_code, ...mouseData } = mouseForm
+      const res = await miceApi.createMouse({ ...mouseData, mouse_code: singleCode })
       ElMessage.success(res.message || (res.mouse_code !== singleCode
         ? `耳标编号 [${singleCode}] 已存在，已自动更名为 [${res.mouse_code}]`
         : '小鼠已成功录入'))

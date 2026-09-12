@@ -55,16 +55,23 @@ class GenotypeEntryTests(unittest.TestCase):
         })
         latest, = self.save({
             'mouse_code': 'A1', 'test_date': '2026-09-02', 'genotype_1': 'HET',
-            'op_record': 'Operator A', 'notes': 'first note'
+            'dob': '2026-07-01', 'op_record': 'Operator A', 'notes': 'first note'
         })
         mouse = self.db.query(Mouse).filter_by(mouse_code='A1').one()
-        self.assertEqual((mouse.genotype_1, mouse.test_date), ('HET', '2026-09-02'))
+        self.assertEqual(
+            (mouse.genotype_1, mouse.test_date, mouse.dob),
+            ('HET', '2026-09-02', '2026-07-01'),
+        )
 
         update_genotype_record(latest.id, GenotypeRecordUpdate(
-            test_date='2026-08-31', op_record='Operator B', notes='updated note'
+            test_date='2026-08-31', dob='2026-07-02',
+            op_record='Operator B', notes='updated note'
         ), self.db, self.admin)
         self.db.refresh(mouse)
-        self.assertEqual((mouse.genotype_1, mouse.test_date), ('WT', '2026-09-01'))
+        self.assertEqual(
+            (mouse.genotype_1, mouse.test_date, mouse.dob),
+            ('WT', '2026-09-01', '2026-07-02'),
+        )
         updated = self.db.get(GenotypeRecord, latest.id)
         self.assertEqual((updated.op_record, updated.notes), ('Operator B', 'updated note'))
 
