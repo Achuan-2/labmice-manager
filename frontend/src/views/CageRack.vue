@@ -531,25 +531,47 @@
 
     <el-dialog v-model="showManageRooms" title="管理鼠房" width="min(720px, 94vw)">
       <div class="flex justify-end mb-3">
-        <el-button type="success" :disabled="!!deletingRoom" @click="openAddRoomDialog">
+        <el-button type="success" :disabled="!!deletingRoom || !!reassigningRoom" @click="openAddRoomDialog">
           <el-icon class="mr-1"><Plus /></el-icon> 新增鼠房
         </el-button>
       </div>
-      <div class="text-sm text-gray-500 mb-3">有小鼠的鼠房需先转移全部小鼠，才能删除。删除空鼠房会同时删除其空笼位，历史小鼠档案和流转记录保留。</div>
+      <div class="text-sm text-gray-500 mb-3">拖动鼠房到目标分类名称上，可调整鼠房分类。有小鼠的鼠房需先转移全部小鼠，才能删除。</div>
       <el-table v-loading="managingRoomsLoading" :data="managedRoomTree" row-key="treeKey" default-expand-all :tree-props="{ children: 'children' }" max-height="420" empty-text="暂无鼠房">
         <el-table-column prop="name" label="鼠房分类 / 鼠房" min-width="220">
           <template #default="{ row }">
-            <span :class="{ 'font-semibold': row.isCategory }">{{ row.name }}</span>
-            <span v-if="row.isCategory" class="room-category-count text-xs text-gray-400">{{ row.children.length }} 个鼠房</span>
+            <div
+              v-if="row.isCategory"
+              class="room-category-drop-target"
+              :class="{ 'is-drag-over': draggedRoom && dragTargetCategory === row.name }"
+              @dragenter.prevent="handleRoomDragOver(row.name)"
+              @dragover.prevent="handleRoomDragOver(row.name, $event)"
+              @drop.prevent.stop="dropRoomIntoCategory(row.name)"
+            >
+              <span class="font-semibold">{{ row.name }}</span>
+              <span class="room-category-count text-xs text-gray-400">{{ row.children.length }} 个鼠房</span>
+              <span v-if="draggedRoom" class="room-drop-hint text-xs">放到此分类</span>
+            </div>
+            <div
+              v-else
+              class="managed-room-drag-item"
+              :class="{ 'is-dragging': draggedRoom?.name === row.name }"
+              :draggable="!reassigningRoom"
+              @dragstart="startRoomDrag(row, $event)"
+              @dragend="finishRoomDrag"
+            >
+              <span class="room-drag-handle" title="拖动调整分类">⋮⋮</span>
+              <span>{{ row.name }}</span>
+              <span v-if="reassigningRoom === row.name" class="text-xs text-gray-400">保存中…</span>
+            </div>
           </template>
         </el-table-column>
         <el-table-column prop="cage_count" label="笼位数" width="80" />
         <el-table-column prop="mouse_count" label="小鼠数" width="80" />
         <el-table-column label="操作" width="90">
           <template #default="{ row }">
-            <el-button v-if="!row.isCategory && row.mouse_count > 0" type="danger" link :disabled="!!deletingRoom" @click="ElMessage.warning(`该鼠房还有 ${row.mouse_count} 只小鼠，请先将全部小鼠转移后再删除`)">删除</el-button>
+            <el-button v-if="!row.isCategory && row.mouse_count > 0" type="danger" link :disabled="!!deletingRoom || !!reassigningRoom" @click="ElMessage.warning(`该鼠房还有 ${row.mouse_count} 只小鼠，请先将全部小鼠转移后再删除`)">删除</el-button>
             <el-popconfirm v-else-if="!row.isCategory" :title="`确定删除鼠房 ${row.name} 及其 ${row.cage_count} 个空笼位吗？`" @confirm="deleteManagedRoom(row)">
-              <template #reference><el-button type="danger" link :loading="deletingRoom === row.name" :disabled="!!deletingRoom">删除</el-button></template>
+              <template #reference><el-button type="danger" link :loading="deletingRoom === row.name" :disabled="!!deletingRoom || !!reassigningRoom">删除</el-button></template>
             </el-popconfirm>
           </template>
         </el-table-column>
@@ -1194,6 +1216,9 @@ const managedRoomTree = computed(() => roomCategories.map(category => {
 }))
 const managingRoomsLoading = ref(false)
 const deletingRoom = ref('')
+const draggedRoom = ref(null)
+const dragTargetCategory = ref('')
+const reassigningRoom = ref('')
 
 async function openManageRooms() {
   showManageRooms.value = true
@@ -1204,6 +1229,54 @@ async function openManageRooms() {
     ElMessage.error('加载鼠房列表失败')
   } finally {
     managingRoomsLoading.value = false
+  }
+}
+
+function startRoomDrag(room, event) {
+  if (reassigningRoom.value) {
+    event.preventDefault()
+    return
+  }
+  draggedRoom.value = room
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('text/plain', room.name)
+}
+
+function handleRoomDragOver(category, event) {
+  if (!draggedRoom.value || reassigningRoom.value) return
+  dragTargetCategory.value = category
+  if (event?.dataTransfer) event.dataTransfer.dropEffect = 'move'
+}
+
+function finishRoomDrag() {
+  draggedRoom.value = null
+  dragTargetCategory.value = ''
+}
+
+async function dropRoomIntoCategory(category) {
+  const room = draggedRoom.value
+  finishRoomDrag()
+  if (!room || reassigningRoom.value || room.category === category) return
+
+  const previousCategory = room.category
+  managedRooms.value = managedRooms.value.map(item => item.name === room.name
+    ? { ...item, category }
+    : item)
+  reassigningRoom.value = room.name
+  try {
+    await cagesApi.createRoom({ name: room.name, category })
+    savedRoomCategories.value = { ...savedRoomCategories.value, [room.name]: category }
+    if (activeRoom.value === room.name) activeCategory.value = category
+    await loadRooms()
+    await loadCages()
+    ElMessage.success(`已将 ${room.name} 移至${category}`)
+  } catch (e) {
+    managedRooms.value = managedRooms.value.map(item => item.name === room.name
+      ? { ...item, category: previousCategory }
+      : item)
+    ElMessage.error(e.response?.data?.detail || '调整鼠房分类失败')
+  } finally {
+    reassigningRoom.value = ''
   }
 }
 
@@ -1407,6 +1480,55 @@ onMounted(async () => {
 .room-category-count {
   display: inline-block;
   margin-left: 24px;
+}
+
+.room-category-drop-target {
+  display: inline-flex;
+  align-items: center;
+  width: calc(100% - 28px);
+  min-height: 34px;
+  margin: -5px -8px -5px 0;
+  padding: 5px 8px;
+  border: 1px dashed transparent;
+  border-radius: 7px;
+  vertical-align: middle;
+  transition: color 0.15s, background-color 0.15s, border-color 0.15s;
+}
+
+.room-category-drop-target.is-drag-over {
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary);
+}
+
+.room-drop-hint {
+  margin-left: auto;
+  color: var(--el-color-primary);
+}
+
+.managed-room-drag-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  vertical-align: middle;
+  cursor: grab;
+  user-select: none;
+}
+
+.managed-room-drag-item:active {
+  cursor: grabbing;
+}
+
+.managed-room-drag-item.is-dragging {
+  opacity: 0.45;
+}
+
+.room-drag-handle {
+  color: var(--el-text-color-placeholder);
+  font-weight: 700;
+  letter-spacing: -4px;
 }
 
 .room-settings-button {
