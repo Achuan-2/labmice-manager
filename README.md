@@ -4,8 +4,7 @@
 
 ![](https://fastly.jsdelivr.net/gh/Achuan-2/PicBed/assets/20260913001015-2026-09-13.png)
 
-![](https://fastly.jsdelivr.net/gh/Achuan-2/PicBed/assets/PixPin_2026-09-12_18-25-19-20260912182524-48dg47a-2026-09-13.png)![](https://fastly.jsdelivr.net/gh/Achuan-2/PicBed/assets/20260913001008-2026-09-13.png)
----
+![](https://fastly.jsdelivr.net/gh/Achuan-2/PicBed/assets/PixPin_2026-09-12_18-25-19-20260912182524-48dg47a-2026-09-13.png)
 
 ## 🌟 核心功能特性
 
