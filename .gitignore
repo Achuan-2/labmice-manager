@@ -23,9 +23,6 @@ dist/
 dist-ssr/
 *.local
 
-# Logs
-.wrangler/
-.dev.vars*
 .env
 .env.*
 !.env.example

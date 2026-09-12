@@ -304,14 +304,20 @@
           <el-input v-model="submitForm.age_gender_req" placeholder="如 成年/雄鼠, 老年/无要求" />
         </el-form-item>
         <el-form-item label="期望转入鼠房">
-          <el-select
-            v-model="submitForm.target_room"
-            placeholder="请选择东五或东四"
-            style="width: 100%"
-          >
-            <el-option label="东五" value="东五" />
-            <el-option label="东四" value="东四" />
-          </el-select>
+          <div class="transfer-room-field">
+            <el-select
+              v-model="submitForm.target_room"
+              filterable
+              allow-create
+              default-first-option
+              placeholder="请选择或输入新鼠房"
+              style="flex: 1"
+            >
+              <el-option v-for="room in transferRoomOptions" :key="room" :label="room" :value="room" />
+            </el-select>
+            <el-button v-if="authStore.isAdmin" plain @click="openTransferRoomSettings">设置</el-button>
+          </div>
+          <div class="text-xs text-gray-400 mt-1">下拉选择已有选项，或直接输入新鼠房后按回车确认</div>
         </el-form-item>
         <el-form-item label="申请笼位数量">
           <el-input-number v-model="submitForm.cage_count" :min="1" :max="10" />
@@ -324,6 +330,37 @@
         <el-button @click="showSubmitDialog = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="handleSubmitRequest">提交申请</el-button>
       </template>
+    </el-dialog>
+
+    <el-dialog v-model="showTransferRoomSettings" title="设置期望转入鼠房" width="min(520px, 92vw)" append-to-body>
+      <div class="transfer-room-add-row">
+        <el-input
+          v-model="newTransferRoomName"
+          maxlength="64"
+          placeholder="输入新鼠房名称"
+          @keyup.enter="addTransferRoomOption"
+        />
+        <el-button type="primary" :loading="addingTransferRoom" @click="addTransferRoomOption">新增</el-button>
+      </div>
+      <div class="text-xs text-gray-400 mb-3">重命名或删除只调整今后的下拉选项，不改动已有申请记录。</div>
+      <div v-for="room in transferRoomOptions" :key="room" class="transfer-room-setting-row">
+        <el-input v-model="transferRoomDrafts[room]" maxlength="64" />
+        <el-button
+          type="primary"
+          link
+          :loading="savingTransferRoom === room"
+          :disabled="!transferRoomDrafts[room]?.trim() || transferRoomDrafts[room]?.trim() === room"
+          @click="renameTransferRoomOption(room)"
+        >保存</el-button>
+        <el-popconfirm
+          :title="`确定删除选项“${room}”吗？`"
+          @confirm="deleteTransferRoomOption(room)"
+        >
+          <template #reference>
+            <el-button type="danger" link :loading="deletingTransferRoom === room" :disabled="transferRoomOptions.length <= 1">删除</el-button>
+          </template>
+        </el-popconfirm>
+      </div>
     </el-dialog>
 
     <!-- Admin Process Request Dialog -->
@@ -509,7 +546,7 @@
 <script setup>
 import { ref, reactive, computed, nextTick, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { transferRequestsApi, miceApi, strainsApi, claimersApi, cagesApi } from '@/api'
+import { transferRequestsApi, miceApi, strainsApi, claimersApi, cagesApi, settingsApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { useClaimerColors } from '@/composables/useClaimerColors'
 import MouseDetailModal from '@/components/MouseDetailModal.vue'
@@ -525,6 +562,7 @@ const loading = ref(false)
 const requests = ref([])
 const strainOptions = ref([])
 const roomOptions = ref([])
+const transferRoomOptions = ref(['东五', '东四'])
 const claimerOptions = ref([])
 const claimerOptionsLoading = ref(false)
 
@@ -668,8 +706,16 @@ const submitForm = reactive({
 
 const submitRules = {
   demander: [{ required: true, whitespace: true, message: '请选择或输入需求者姓名', trigger: 'change' }],
-  strain: [{ required: true, message: '请输入小鼠品系', trigger: 'blur' }]
+  strain: [{ required: true, message: '请输入小鼠品系', trigger: 'blur' }],
+  target_room: [{ required: true, whitespace: true, message: '请选择或输入期望转入鼠房', trigger: 'change' }]
 }
+
+const showTransferRoomSettings = ref(false)
+const newTransferRoomName = ref('')
+const addingTransferRoom = ref(false)
+const savingTransferRoom = ref('')
+const deletingTransferRoom = ref('')
+const transferRoomDrafts = reactive({})
 
 // Process Dialog (Admin)
 const showProcessDialog = ref(false)
@@ -805,6 +851,77 @@ async function loadStrainOptions() {
   }
 }
 
+function applyTransferRoomOptions(rooms) {
+  const normalized = [...new Set((Array.isArray(rooms) ? rooms : [])
+    .map(room => String(room || '').trim())
+    .filter(Boolean))]
+  transferRoomOptions.value = normalized.length ? normalized : ['东五', '东四']
+  for (const key of Object.keys(transferRoomDrafts)) delete transferRoomDrafts[key]
+  for (const room of transferRoomOptions.value) transferRoomDrafts[room] = room
+}
+
+async function loadTransferRoomOptions() {
+  try {
+    const settings = await settingsApi.getPublic()
+    applyTransferRoomOptions(settings.transfer_rooms)
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('加载期望转入鼠房选项失败')
+  }
+}
+
+async function openTransferRoomSettings() {
+  await loadTransferRoomOptions()
+  newTransferRoomName.value = ''
+  showTransferRoomSettings.value = true
+}
+
+async function addTransferRoomOption() {
+  const name = newTransferRoomName.value.trim()
+  if (!name) return ElMessage.warning('请输入鼠房名称')
+  addingTransferRoom.value = true
+  try {
+    const result = await settingsApi.addTransferRoom({ name })
+    applyTransferRoomOptions(result.transfer_rooms)
+    newTransferRoomName.value = ''
+    ElMessage.success('鼠房选项已新增')
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '新增鼠房选项失败')
+  } finally {
+    addingTransferRoom.value = false
+  }
+}
+
+async function renameTransferRoomOption(oldName) {
+  const name = String(transferRoomDrafts[oldName] || '').trim()
+  if (!name || name === oldName) return
+  savingTransferRoom.value = oldName
+  try {
+    const result = await settingsApi.renameTransferRoom(oldName, { name })
+    applyTransferRoomOptions(result.transfer_rooms)
+    if (submitForm.target_room === oldName) submitForm.target_room = name
+    ElMessage.success('鼠房选项已重命名')
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '重命名失败')
+  } finally {
+    savingTransferRoom.value = ''
+  }
+}
+
+async function deleteTransferRoomOption(name) {
+  deletingTransferRoom.value = name
+  try {
+    const result = await settingsApi.deleteTransferRoom(name)
+    applyTransferRoomOptions(result.transfer_rooms)
+    if (submitForm.target_room === name) submitForm.target_room = transferRoomOptions.value[0] || ''
+    ElMessage.success('鼠房选项已删除')
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '删除失败')
+  } finally {
+    deletingTransferRoom.value = ''
+  }
+}
+
 async function loadRoomOptions() {
   try {
     const rooms = await cagesApi.listRooms({ include_categories: true })
@@ -927,7 +1044,7 @@ function openSubmitDialog() {
     demander: '', // 默认姓名为空，由需求者自己填写
     strain: '',
     age_gender_req: '成年/无要求',
-    target_room: '东五',
+    target_room: transferRoomOptions.value[0] || '',
     cage_count: 1,
     feedback: ''
   })
@@ -944,6 +1061,8 @@ async function handleSubmitRequest() {
     if (!valid) return
     submitting.value = true
     try {
+      const roomResult = await settingsApi.addTransferRoom({ name: submitForm.target_room.trim() })
+      applyTransferRoomOptions(roomResult.transfer_rooms)
       await transferRequestsApi.createRequest(submitForm)
       ElMessage.success('转鼠需求已成功提交，请等待管理员处理！')
       showSubmitDialog.value = false
@@ -1014,6 +1133,7 @@ onMounted(async () => {
   await Promise.all([
     loadStrainOptions(),
     loadRoomOptions(),
+    loadTransferRoomOptions(),
     loadRequests()
   ])
 
@@ -1037,6 +1157,28 @@ onMounted(async () => {
 :deep(.el-form-item__label) {
   white-space: nowrap !important;
   font-weight: 500;
+}
+
+.transfer-room-field,
+.transfer-room-add-row,
+.transfer-room-setting-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.transfer-room-add-row {
+  margin-bottom: 8px;
+}
+
+.transfer-room-setting-row {
+  padding: 8px 0;
+  border-top: 1px solid #ebeef5;
+}
+
+.transfer-room-setting-row .el-input {
+  flex: 1;
 }
 
 .candidate-panel {

@@ -58,6 +58,7 @@ class SettingsApiTests(unittest.TestCase):
         self.assertEqual(response.json(), {
             'group_name': '课题组',
             'system_name': '课题组小鼠管理系统',
+            'transfer_rooms': ['东五', '东四'],
         })
 
         self.assertEqual(
@@ -83,6 +84,34 @@ class SettingsApiTests(unittest.TestCase):
             headers=self.admin_headers,
         )
         self.assertEqual(response.status_code, 422)
+
+    def test_transfer_room_options_can_be_added_renamed_and_deleted(self):
+        added = self.client.post(
+            '/api/settings/transfer-rooms',
+            json={'name': ' 枫林 '},
+            headers=self.admin_headers,
+        )
+        self.assertEqual(added.status_code, 200)
+        self.assertEqual(added.json()['transfer_rooms'], ['东五', '东四', '枫林'])
+
+        renamed = self.client.put(
+            '/api/settings/transfer-rooms/%E6%9E%AB%E6%9E%97',
+            json={'name': '枫林实验楼'},
+            headers=self.admin_headers,
+        )
+        self.assertEqual(renamed.status_code, 200)
+        self.assertEqual(renamed.json()['transfer_rooms'], ['东五', '东四', '枫林实验楼'])
+
+        deleted = self.client.delete(
+            '/api/settings/transfer-rooms/%E4%B8%9C%E5%9B%9B',
+            headers=self.admin_headers,
+        )
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(deleted.json()['transfer_rooms'], ['东五', '枫林实验楼'])
+        self.assertEqual(
+            self.client.get('/api/settings/public').json()['transfer_rooms'],
+            ['东五', '枫林实验楼'],
+        )
 
 
 if __name__ == '__main__':

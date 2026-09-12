@@ -4,20 +4,6 @@
   "type": "module",
   "packageManager": "pnpm@10.32.1",
   "scripts": {
-    "build": "pnpm --dir frontend build",
-    "dev:cloudflare": "wrangler dev",
-    "deploy:cloudflare": "pnpm build && wrangler deploy",
-    "db:migrate:local": "wrangler d1 migrations apply mouse-lab --local",
-    "db:migrate:remote": "wrangler d1 migrations apply mouse-lab --remote",
-    "test:cloudflare": "node --test cloudflare/tests/*.test.mjs"
-  },
-  "dependencies": {
-    "hono": "^4.12.0",
-    "jose": "^6.1.0",
-    "sql.js": "^1.14.2",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
-  },
-  "devDependencies": {
-    "wrangler": "^4.67.0"
+    "build": "pnpm --dir frontend build"
   }
 }

@@ -44,6 +44,9 @@ export const authApi = {
 export const settingsApi = {
   getPublic: () => api.get('/settings/public'),
   update: (data) => api.put('/settings', data),
+  addTransferRoom: (data) => api.post('/settings/transfer-rooms', data),
+  renameTransferRoom: (oldName, data) => api.put(`/settings/transfer-rooms/${encodeURIComponent(oldName)}`, data),
+  deleteTransferRoom: (name) => api.delete(`/settings/transfer-rooms/${encodeURIComponent(name)}`),
 }
 
 export const miceApi = {

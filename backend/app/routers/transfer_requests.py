@@ -43,8 +43,10 @@ def create_transfer_request(
     if not clean_demander:
         raise HTTPException(status_code=400, detail="需求者姓名不能为空")
     target_room = (data.target_room or "东五").strip()
-    if target_room not in ("东四", "东五"):
-        raise HTTPException(status_code=400, detail="转入鼠房仅支持东四或东五")
+    if not target_room:
+        raise HTTPException(status_code=400, detail="期望转入鼠房不能为空")
+    if len(target_room) > 64:
+        raise HTTPException(status_code=400, detail="期望转入鼠房不能超过 64 个字符")
 
     today_str = data.request_date or datetime.date.today().strftime("%Y-%m-%d")
 
