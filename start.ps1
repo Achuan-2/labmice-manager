@@ -22,4 +22,4 @@ if (-not (Test-Path -LiteralPath $pythonExe)) {
 }
 
 # 使用 Python 模块入口，避免 uvicorn.exe 在包含中文的项目路径下解析失败。
-& $pythonExe -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
+& $pythonExe -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
