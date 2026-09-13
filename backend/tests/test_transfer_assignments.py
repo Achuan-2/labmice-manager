@@ -125,6 +125,19 @@ class TransferAssignmentTests(unittest.TestCase):
         self.assertEqual(self.db.query(TransferLog).count(), logs_before)
         self.assertEqual(self.db.query(TransferRequestAssignment).count(), 2)
 
+    def test_metadata_only_update_does_not_overwrite_later_mouse_state(self):
+        self.stage("M0")
+        mouse = self.mice[0]
+        mouse.cage_id = None
+        mouse.status = "死亡"
+        self.db.commit()
+        logs_before = self.db.query(TransferLog).count()
+
+        self.save(feedback="仅修改反馈")
+
+        self.assertEqual((mouse.cage_id, mouse.status), (None, "死亡"))
+        self.assertEqual(self.db.query(TransferLog).count(), logs_before)
+
     def test_cancel_and_reapprove_and_delete(self):
         self.approve()
         self.save(status="取消")

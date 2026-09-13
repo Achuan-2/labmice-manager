@@ -135,7 +135,7 @@ def reconcile_assignments(db, req, updates, operator):
         db.delete(assignment)
 
     claimer = None
-    if desired_codes:
+    if desired_codes and (added or recipient_changed or phase_changed):
         claimer = db.query(Claimer).filter_by(name=demander).first()
         if claimer is None:
             claimer = Claimer(name=demander)
@@ -154,6 +154,8 @@ def reconcile_assignments(db, req, updates, operator):
     for code in desired_order:
         assignment, mouse = active[code]
         was_added = mouse in added
+        if not (was_added or recipient_changed or phase_changed):
+            continue
         if next_status == "进行中":
             original = assignment.original_state
             for field in ("cage_id", "status", "claim_date", "source_room"):
