@@ -8,10 +8,12 @@ from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 from backend.app.auth_database import get_auth_db
+from backend.app.database import DATA_DIR
 from backend.app.models.models import User
+from backend.app.secret_key import load_or_create_secret_key
 
 # JWT Configuration
-SECRET_KEY = os.getenv("SECRET_KEY", "mouse-secret-key-2026")
+SECRET_KEY = load_or_create_secret_key(os.getenv("SECRET_KEY"), DATA_DIR)
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 

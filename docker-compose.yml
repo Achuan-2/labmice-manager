@@ -14,7 +14,8 @@ services:
       # 启动脚本需要为 Excel 补充读取权限；应用降权后不会取得目录所有权
       - ./excel:/app/excel
     environment:
-      - SECRET_KEY=${SECRET_KEY:?请在 .env 配置随机 SECRET_KEY}
+      # 留空时自动生成 32 位密钥并保存到 data/.secret_key
+      - SECRET_KEY=${SECRET_KEY:-}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:?请在 .env 配置初始管理员密码}
       - DATA_DIR=/app/data
       - TZ=Asia/Shanghai
