@@ -33,7 +33,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/mouse-manager:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/mouse-manager:${{ github.sha }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/labmice-manager:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/labmice-manager:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
