@@ -61,6 +61,7 @@
   ```
 
 - 浏览器访问 **`http://localhost:8000`**。本地初始管理员账号为 **`admin`**，密码为 **`admin123`**；登录后可以在【管理员设置】中修改密码。
+- 未配置 `SECRET_KEY` 时，系统会自动生成随机的 32 位密钥并保存到 `data/.secret_key`，后续启动自动复用；如需自行管理，仍可在启动前设置 `SECRET_KEY` 环境变量。
 
 
 ### 2. Docker 部署
@@ -80,7 +81,7 @@
    docker pull achuan1037/labmice-manager:latest
    ```
 
-3. 启动容器。请将示例中的密钥和初始管理员密码替换为自己的值：
+3. 启动容器。请将示例中的初始管理员密码替换为自己的值：
 
    ```bash
    docker run -d \
@@ -89,7 +90,6 @@
      -p 8000:8000 \
      -v "$(pwd)/data:/app/data" \
      -v "$(pwd)/excel:/app/excel" \
-     -e SECRET_KEY="请替换为随机长密钥" \
      -e ADMIN_PASSWORD="请替换为初始管理员密码" \
      -e TZ="Asia/Shanghai" \
      achuan1037/labmice-manager:latest
@@ -97,6 +97,5 @@
 
 4. 浏览器访问 `http://服务器IP:8000`。群晖 NAS 用户也可以在 **Container Manager** 的注册表中搜索 `achuan1037/labmice-manager` 并下载 `latest` 镜像，然后按上述端口、文件夹映射和环境变量创建容器。
 
-容器启动时会自动为 `data` 设置 `10001:10001` 所有权和写权限，并为 `excel` 补充读取权限，随后降权为 `10001:10001` 运行网站。因此在群晖 Container Manager 中只需选择两个宿主机文件夹，不要额外填写“用户”或把 `excel` 映射设为只读；无需再手动执行 `chown`、`chmod`。业务进程仍以非 root 用户运行。
 
-数据持久化存放在宿主机的 `data` 目录：`mouse-manager.db` 保存小鼠业务数据，`accounts.db` 单独保存账号和密码哈希。完整备份需同时保留这两个数据库，最简单的方式是备份整个 `data` 文件夹；网站内的数据库导出/恢复仅处理小鼠业务数据库，不会覆盖账号。
+数据持久化存放在宿主机的 `data` 目录：`mouse-manager.db` 保存小鼠业务数据，`accounts.db` 单独保存账号和密码哈希，`.secret_key` 保存自动生成的登录令牌密钥。完整备份应保留整个 `data` 文件夹；网站内的数据库导出/恢复仅处理小鼠业务数据库，不会覆盖账号或自动生成的密钥。
