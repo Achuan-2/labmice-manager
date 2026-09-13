@@ -41,11 +41,26 @@
 ## 🚀 启动与使用
 
 ### 1. Windows 本地极速启动
-- 直接双击项目根目录下的 **`start.bat`** 脚本，或在 PowerShell 中执行：
+
+#### 首次安装运行环境
+
+1. 安装 [uv](https://docs.astral.sh/uv/)、Node.js 22 或更高版本，以及 pnpm，然后在项目根目录执行：
+
+   ```powershell
+   uv sync --project backend --locked
+   pnpm install --dir frontend --frozen-lockfile
+   pnpm run build
+   ```
+
+#### 启动网站
+
+- 本地使用无需配置环境变量。可以直接双击项目根目录下的 **`start.bat`**，或在 PowerShell 中执行：
+
   ```powershell
   .\start.ps1
   ```
-- 浏览器打开访问：**`http://localhost:8000`**。
+
+- 浏览器访问 **`http://localhost:8000`**。本地初始管理员账号为 **`admin`**，密码为 **`admin123`**；登录后可以在【管理员设置】中修改密码。
 
 
 ### 2. Docker 部署
