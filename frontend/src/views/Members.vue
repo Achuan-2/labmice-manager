@@ -22,7 +22,7 @@
       </div>
     </div>
 
-    <!-- Member Cards Grid -->
+    <!-- Member Cards grouped by role -->
     <div v-if="!loading && claimers.length === 0" class="bg-white rounded-xl shadow-sm border border-gray-200 p-8 text-center text-gray-400">
       暂无课题组成员档案，点击上方“新增成员”添加
     </div>
@@ -31,94 +31,106 @@
       未找到与“<span class="text-gray-700 font-semibold">{{ searchQuery }}</span>”相匹配的课题组成员，可清空搜索条件重试
     </div>
 
-    <div v-else v-loading="loading" class="claimers-grid">
-      <div
-        v-for="c in filteredMembers"
-        :key="c.id"
-        class="claimer-card bg-white rounded-xl shadow-sm border border-gray-200"
-        :style="{ borderTop: '4px solid ' + (c.color || '#2563eb') }"
-      >
-        <div>
-          <div class="flex items-start justify-between mb-3">
-            <div class="flex items-center gap-2 flex-wrap">
-              <span
-                class="px-2.5 py-0.5 rounded-full text-base font-bold border inline-flex items-center gap-1.5 shadow-2xs"
-                :style="{
-                  backgroundColor: (c.color || '#2563eb') + '15',
-                  color: c.color || '#2563eb',
-                  borderColor: (c.color || '#2563eb') + '40'
-                }"
-              >
-                <span
-                  class="color-dot rounded-full inline-block"
-                  :style="{ backgroundColor: c.color || '#2563eb' }"
-                ></span>
-                {{ c.name }}
-              </span>
-              <el-tag size="small" :type="getRoleTagType(c.role)">{{ c.role === '实验管家' ? '管家' : (c.role || '学生') }}</el-tag>
-            </div>
-
-            <!-- Mice Count Badge -->
-            <el-tag
-              size="default"
-              class="font-bold border"
-              :style="{
-                backgroundColor: (c.color || '#2563eb') + '15',
-                color: c.color || '#2563eb',
-                borderColor: (c.color || '#2563eb') + '35'
-              }"
-            >
-              {{ c.mouse_count }} 只小鼠
-            </el-tag>
+    <div v-else v-loading="loading" class="member-groups">
+      <section v-for="group in filteredMemberGroups" :key="group.role" class="member-group">
+        <div class="member-group-header">
+          <div class="flex items-center gap-2">
+            <span class="member-group-title">{{ group.role }}</span>
+            <el-tag size="small" effect="plain" round>{{ group.members.length }} 人</el-tag>
           </div>
-
-          <div class="claimer-info text-xs text-gray-500 bg-gray-50 rounded-lg flex flex-col gap-1.5">
-            <div v-if="c.email" class="flex items-center gap-1.5">
-              <span>📧</span>
-              <span class="text-gray-400">邮箱:</span>
-              <span class="text-gray-700 font-mono">{{ c.email }}</span>
-            </div>
-            <div v-if="c.phone" class="flex items-center gap-1.5">
-              <span>📱</span>
-              <span class="text-gray-400">电话:</span>
-              <span class="text-gray-700 font-mono">{{ c.phone }}</span>
-            </div>
-            <div v-if="c.notes" class="flex items-start gap-1.5">
-              <span>📝</span>
-              <span class="text-gray-400">备注:</span>
-              <span class="text-gray-700">{{ c.notes }}</span>
-            </div>
-            <div v-if="!c.email && !c.phone && !c.notes" class="text-gray-400">
-              <span>暂无附加联系信息</span>
-            </div>
-          </div>
+          <div class="member-group-line"></div>
         </div>
 
-        <div class="claimer-footer flex items-center justify-between">
-          <el-button
-            link
-            size="small"
-            class="font-bold"
-            :style="{ color: c.color || '#2563eb' }"
-            @click="viewMemberMice(c)"
+        <div class="claimers-grid">
+          <div
+            v-for="c in group.members"
+            :key="c.id"
+            class="claimer-card bg-white rounded-xl shadow-sm border border-gray-200"
+            :style="{ borderTop: '4px solid ' + (c.color || '#2563eb') }"
           >
-            查看其领用小鼠 ({{ c.mouse_count }}) →
-          </el-button>
+            <div>
+              <div class="flex items-start justify-between mb-3">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span
+                    class="px-2.5 py-0.5 rounded-full text-base font-bold border inline-flex items-center gap-1.5 shadow-2xs"
+                    :style="{
+                      backgroundColor: (c.color || '#2563eb') + '15',
+                      color: c.color || '#2563eb',
+                      borderColor: (c.color || '#2563eb') + '40'
+                    }"
+                  >
+                    <span
+                      class="color-dot rounded-full inline-block"
+                      :style="{ backgroundColor: c.color || '#2563eb' }"
+                    ></span>
+                    {{ c.name }}
+                  </span>
+                  <el-tag size="small" :type="getRoleTagType(c.role)">{{ getDisplayRole(c.role) }}</el-tag>
+                </div>
 
-          <div class="flex items-center gap-1">
-            <el-button link size="small" type="primary" @click="openEditDialog(c)">编辑信息</el-button>
-            <el-popconfirm
-              v-if="authStore.isAdmin"
-              title="确定删除该成员吗？其名下小鼠将恢复为未分配"
-              @confirm="handleDelete(c.id)"
-            >
-              <template #reference>
-                <el-button link size="small" type="danger">删除</el-button>
-              </template>
-            </el-popconfirm>
+                <!-- Mice Count Badge -->
+                <el-tag
+                  size="default"
+                  class="font-bold border"
+                  :style="{
+                    backgroundColor: (c.color || '#2563eb') + '15',
+                    color: c.color || '#2563eb',
+                    borderColor: (c.color || '#2563eb') + '35'
+                  }"
+                >
+                  {{ c.mouse_count }} 只小鼠
+                </el-tag>
+              </div>
+
+              <div class="claimer-info text-xs text-gray-500 bg-gray-50 rounded-lg flex flex-col gap-1.5">
+                <div v-if="c.email" class="flex items-center gap-1.5">
+                  <span>📧</span>
+                  <span class="text-gray-400">邮箱:</span>
+                  <span class="text-gray-700 font-mono">{{ c.email }}</span>
+                </div>
+                <div v-if="c.phone" class="flex items-center gap-1.5">
+                  <span>📱</span>
+                  <span class="text-gray-400">电话:</span>
+                  <span class="text-gray-700 font-mono">{{ c.phone }}</span>
+                </div>
+                <div v-if="c.notes" class="flex items-start gap-1.5">
+                  <span>📝</span>
+                  <span class="text-gray-400">备注:</span>
+                  <span class="text-gray-700">{{ c.notes }}</span>
+                </div>
+                <div v-if="!c.email && !c.phone && !c.notes" class="text-gray-400">
+                  <span>暂无附加联系信息</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="claimer-footer flex items-center justify-between">
+              <el-button
+                link
+                size="small"
+                class="font-bold"
+                :style="{ color: c.color || '#2563eb' }"
+                @click="viewMemberMice(c)"
+              >
+                查看其领用小鼠 ({{ c.mouse_count }}) →
+              </el-button>
+
+              <div class="flex items-center gap-1">
+                <el-button link size="small" type="primary" @click="openEditDialog(c)">编辑信息</el-button>
+                <el-popconfirm
+                  v-if="authStore.isAdmin"
+                  title="确定删除该成员吗？其名下小鼠将恢复为未分配"
+                  @confirm="handleDelete(c.id)"
+                >
+                  <template #reference>
+                    <el-button link size="small" type="danger">删除</el-button>
+                  </template>
+                </el-popconfirm>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      </section>
     </div>
 
     <!-- Member Mice Drawer -->
@@ -328,16 +340,49 @@ const loading = ref(false)
 const claimers = ref([])
 const searchQuery = ref('')
 
+const ROLE_ORDER = ['PI / 导师', '博士后', '科研助理', '管家', '学生']
+const nameCollator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' })
+
+function getDisplayRole(role) {
+  const cleanRole = (role || '').trim()
+  if (!cleanRole) return '学生'
+  if (cleanRole === '实验管家') return '管家'
+  if (cleanRole === 'PI/导师') return 'PI / 导师'
+  return cleanRole
+}
+
 const filteredMembers = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
   if (!q) return claimers.value
   return claimers.value.filter(c => {
     const name = (c.name || '').toLowerCase()
-    const role = (c.role === '实验管家' ? '管家' : (c.role || '学生')).toLowerCase()
+    const role = getDisplayRole(c.role).toLowerCase()
     const email = (c.email || '').toLowerCase()
     const phone = (c.phone || '').toLowerCase()
     const notes = (c.notes || '').toLowerCase()
     return name.includes(q) || role.includes(q) || email.includes(q) || phone.includes(q) || notes.includes(q)
+  })
+})
+
+const filteredMemberGroups = computed(() => {
+  const grouped = new Map()
+
+  filteredMembers.value.forEach(member => {
+    const role = getDisplayRole(member.role)
+    if (!grouped.has(role)) grouped.set(role, [])
+    grouped.get(role).push(member)
+  })
+
+  return Array.from(grouped, ([role, members]) => ({
+    role,
+    members: [...members].sort((a, b) => nameCollator.compare(a.name || '', b.name || ''))
+  })).sort((a, b) => {
+    const aIndex = ROLE_ORDER.indexOf(a.role)
+    const bIndex = ROLE_ORDER.indexOf(b.role)
+    if (aIndex !== -1 || bIndex !== -1) {
+      return (aIndex === -1 ? ROLE_ORDER.length : aIndex) - (bIndex === -1 ? ROLE_ORDER.length : bIndex)
+    }
+    return nameCollator.compare(a.role, b.role)
   })
 })
 const showMiceDrawer = ref(false)
@@ -513,6 +558,33 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.member-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-height: 120px;
+}
+
+.member-group-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.member-group-title {
+  color: #1f2937;
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.member-group-line {
+  height: 1px;
+  flex: 1;
+  background: #e5e7eb;
+}
+
 .claimers-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -562,4 +634,3 @@ onMounted(() => {
   justify-content: space-between;
 }
 </style>
-
