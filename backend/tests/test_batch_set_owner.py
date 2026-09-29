@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 
 from backend.app.database import Base
 from backend.app.models.models import Cage, Mouse, TransferLog, User
-from backend.app.routers.mice import batch_set_owner
-from backend.app.schemas.schemas import MouseBatchSetOwner
+from backend.app.routers.mice import batch_set_owner, update_mouse
+from backend.app.schemas.schemas import MouseBatchSetOwner, MouseUpdate
 from backend.app.services.mouse_status_service import sync_mouse_statuses
 
 
@@ -59,6 +59,20 @@ class BatchSetOwnerTests(unittest.TestCase):
         self.assertEqual((self.mouse.cage.room, self.mouse.cage.cage_code), ("实验动物楼406B", "B2"))
         self.assertEqual(self.mouse.status, "已领用")
         self.assertEqual(self.db.query(TransferLog).one().target_cage, "B2")
+
+    def test_archive_edit_moves_owned_mouse_to_room_without_cage(self):
+        batch_set_owner(MouseBatchSetOwner(
+            mouse_ids=[self.mouse.id], owner_name="领取人甲",
+        ), self.db, self.admin)
+
+        result = update_mouse(self.mouse.id, MouseUpdate(
+            source_room="东五", cage_code=None, status="已领用",
+        ), self.db, self.admin)
+
+        self.assertEqual(result["source_room"], "东五")
+        self.assertIsNone(result["cage_id"])
+        self.assertEqual(result["status"], "出笼")
+        self.assertEqual(self.db.query(Cage).count(), 1)
 
 
 if __name__ == "__main__":

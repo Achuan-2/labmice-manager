@@ -465,10 +465,15 @@
             style="width: 100%"
             @change="handleMoveRoomChange"
           >
-            <el-option v-for="room in roomOptions" :key="room" :label="room" :value="room" />
+            <el-option-group label="已有鼠房">
+              <el-option v-for="room in roomOptions" :key="`cage:${room}`" :label="room" :value="`cage:${room}`" />
+            </el-option-group>
+            <el-option-group v-if="canHandoffMice" label="交给领取人管理">
+              <el-option v-for="room in moveTransferRoomOptions" :key="`transfer:${room}`" :label="room" :value="`transfer:${room}`" />
+            </el-option-group>
           </el-select>
         </el-form-item>
-        <el-form-item label="目标笼位" required>
+        <el-form-item v-if="!isDirectHandoffMove" label="目标笼位" required>
           <el-select
             v-model="moveMouseForm.target_cage_code"
             filterable
@@ -486,10 +491,10 @@
           </el-select>
         </el-form-item>
       </el-form>
-      <div class="text-xs text-gray-500">换笼完成后会自动写入“领用与流转日志”。</div>
+      <div class="text-xs text-gray-500">{{ isDirectHandoffMove ? '直接交给领取人管理，无需目标笼位；小鼠将移出原笼位。' : '换笼完成后会自动写入“领用与流转日志”。' }}</div>
       <template #footer>
         <el-button :disabled="movingMouseBusy" @click="showMoveMouseDialog = false">取消</el-button>
-        <el-button type="primary" :loading="movingMouseBusy" @click="submitMoveMouse">确认换笼{{ movingMice.length > 1 ? `（${movingMice.length} 只）` : '' }}</el-button>
+        <el-button type="primary" :loading="movingMouseBusy" @click="submitMoveMouse">{{ isDirectHandoffMove ? '确认交接' : '确认换笼' }}{{ movingMice.length > 1 ? `（${movingMice.length} 只）` : '' }}</el-button>
       </template>
     </el-dialog>
 
@@ -623,7 +628,7 @@
 <script setup>
 import { ref, shallowRef, reactive, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { cagesApi, miceApi, importExportApi } from '@/api'
+import { cagesApi, miceApi, importExportApi, settingsApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { useClaimerColors } from '@/composables/useClaimerColors'
 import SetOwnerDialog from '@/components/SetOwnerDialog.vue'
@@ -754,7 +759,11 @@ const batchEditingMice = ref([])
 const batchEditForm = reactive({ updateStrain: false, strain: '', updateDob: false, dob: '', updateGender: false, gender: '' })
 const movingMice = ref([])
 const targetCageOptions = ref([])
+const moveTransferRoomOptions = ref([])
 const moveMouseForm = reactive({ target_room: '', target_cage_code: '' })
+const canHandoffMice = computed(() => movingMice.value.length > 0 && movingMice.value.every(mouse => mouse.owner_name?.trim()))
+const isDirectHandoffMove = computed(() => moveMouseForm.target_room.startsWith('transfer:'))
+const selectedMoveRoom = computed(() => moveMouseForm.target_room.slice(moveMouseForm.target_room.indexOf(':') + 1))
 const showSplitLitterDialog = ref(false)
 const splitLitterBusy = ref(false)
 const splitLitterDate = ref('')
@@ -1072,11 +1081,23 @@ function openMoveMice(mice) {
   if (!validMice.length) return ElMessage.warning('请先选择需要换笼的小鼠')
   movingMice.value = [...validMice]
   Object.assign(moveMouseForm, {
-    target_room: editingCageRoom.value,
+    target_room: `cage:${editingCageRoom.value}`,
     target_cage_code: ''
   })
-  loadTargetCages(moveMouseForm.target_room)
+  targetCageOptions.value = []
+  moveTransferRoomOptions.value = []
+  loadTargetCages(editingCageRoom.value)
+  if (canHandoffMice.value) loadMoveTransferRooms()
   showMoveMouseDialog.value = true
+}
+
+async function loadMoveTransferRooms() {
+  try {
+    const settings = await settingsApi.getPublic()
+    moveTransferRoomOptions.value = (settings.transfer_rooms || []).filter(room => room !== '东四')
+  } catch (e) {
+    ElMessage.error('加载转入鼠房选项失败')
+  }
 }
 
 function openMoveMouse(mouse) {
@@ -1087,20 +1108,28 @@ function openBatchMoveMice() {
   openMoveMice(selectedEditingCageMice.value)
 }
 
-function handleMoveRoomChange(room) {
+function handleMoveRoomChange() {
   moveMouseForm.target_cage_code = ''
-  loadTargetCages(room)
+  if (isDirectHandoffMove.value) {
+    targetCageOptions.value = []
+  } else {
+    loadTargetCages(selectedMoveRoom.value)
+  }
 }
 
 async function submitMoveMouse() {
   if (!movingMice.value.length || movingMouseBusy.value || !authStore.isAdmin) return
-  const targetRoom = moveMouseForm.target_room.trim()
+  const targetRoom = selectedMoveRoom.value.trim()
   const targetCageCode = moveMouseForm.target_cage_code.trim()
-  if (!targetRoom || !targetCageCode) {
-    ElMessage.warning('请选择目标鼠房和笼位')
+  if (!targetRoom || (!isDirectHandoffMove.value && !targetCageCode)) {
+    ElMessage.warning(isDirectHandoffMove.value ? '请选择目标鼠房' : '请选择目标鼠房和笼位')
     return
   }
-  if (targetRoom === editingCageRoom.value && targetCageCode === editingCageCode.value.trim()) {
+  if (isDirectHandoffMove.value && !canHandoffMice.value) {
+    ElMessage.warning('请先为全部选中小鼠设置领取人')
+    return
+  }
+  if (!isDirectHandoffMove.value && targetRoom === editingCageRoom.value && targetCageCode === editingCageCode.value.trim()) {
     ElMessage.warning('目标笼位不能与当前笼位相同')
     return
   }
@@ -1111,7 +1140,8 @@ async function submitMoveMouse() {
     const result = await miceApi.batchTransfer({
       mouse_ids: [...movingIds],
       target_room: targetRoom,
-      target_cage_code: targetCageCode
+      target_cage_code: isDirectHandoffMove.value ? undefined : targetCageCode,
+      handoff_to_owner: isDirectHandoffMove.value
     })
     editingCageMice.value = editingCageMice.value.filter(item => !movingIds.has(item.id))
     selectedEditingCageMice.value = []
@@ -1367,8 +1397,8 @@ function openSetOwnerForCage(cage) {
   showSetOwnerDialog.value = true
 }
 
-function onSetOwnerSuccess() {
-  loadCages()
+async function onSetOwnerSuccess() {
+  await refreshAfterMouseUpdate()
 }
 
 function openAddCageDialog() {

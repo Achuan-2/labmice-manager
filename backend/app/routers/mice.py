@@ -792,6 +792,13 @@ def batch_set_owner(data: MouseBatchSetOwner, db: Session = Depends(get_db), cur
 
 @router.post("/batch-transfer")
 def batch_transfer(data: MouseBatchTransfer, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    target_room = data.target_room.strip()
+    target_cage_code = (data.target_cage_code or "").strip() or None
+    if not target_room:
+        raise HTTPException(status_code=400, detail="请选择目标鼠房")
+    if data.handoff_to_owner and target_cage_code:
+        raise HTTPException(status_code=400, detail="交给领取人管理时无需填写目标笼位")
+
     query = db.query(Mouse)
     if data.mouse_ids:
         query = query.filter(Mouse.id.in_(data.mouse_ids))
@@ -803,17 +810,21 @@ def batch_transfer(data: MouseBatchTransfer, db: Session = Depends(get_db), curr
     mice = query.all()
     if not mice:
         raise HTTPException(status_code=404, detail="未找到匹配的小鼠")
+    if data.handoff_to_owner:
+        unassigned = [mouse.mouse_code for mouse in mice if not mouse.owner_name]
+        if unassigned:
+            raise HTTPException(status_code=400, detail=f"小鼠 {', '.join(unassigned)} 尚未设置领取人")
 
     target_cage = None
-    if data.target_cage_code:
+    if target_cage_code:
         target_cage = db.query(Cage).filter(
-            Cage.cage_code == data.target_cage_code.strip(),
-            Cage.room == data.target_room.strip()
+            Cage.cage_code == target_cage_code,
+            Cage.room == target_room
         ).first()
         if not target_cage:
             target_cage = Cage(
-                cage_code=data.target_cage_code.strip(),
-                room=data.target_room.strip(),
+                cage_code=target_cage_code,
+                room=target_room,
                 strain=mice[0].strain if mice else "",
                 gender=mice[0].gender if mice else "M"
             )
@@ -833,8 +844,10 @@ def batch_transfer(data: MouseBatchTransfer, db: Session = Depends(get_db), curr
 
         if target_cage:
             m.cage_id = target_cage.id
-        m.source_room = data.target_room
-        if data.status:
+        m.source_room = target_room
+        if data.handoff_to_owner:
+            apply_mouse_status(db, m, "出笼")
+        elif data.status:
             try:
                 apply_mouse_status(db, m, data.status)
             except ValueError as exc:
@@ -843,24 +856,24 @@ def batch_transfer(data: MouseBatchTransfer, db: Session = Depends(get_db), curr
 
     today_str = datetime.date.today().strftime("%Y-%m-%d")
     log = TransferLog(
-        action_type="转房/换笼",
+        action_type="转鼠/交付领取人" if data.handoff_to_owner else "转房/换笼",
         mouse_codes=", ".join(affected_codes),
         mouse_count=len(affected_codes),
         source_room=", ".join(source_rooms) if source_rooms else "未知",
-        target_room=data.target_room,
+        target_room=target_room,
         source_cage=", ".join(source_cages) if source_cages else None,
-        target_cage=data.target_cage_code,
+        target_cage=target_cage_code,
         operator=current_user.display_name or current_user.username,
         date=today_str,
         status="已完成",
-        notes=data.notes or f"转移至 {data.target_room}"
+        notes=data.notes or f"转移至 {target_room}"
     )
     db.add(log)
     db.commit()
 
     return {
         "success": True,
-        "message": f"成功转移 {len(affected_codes)} 只小鼠至 {data.target_room}" + (f" ({data.target_cage_code})" if data.target_cage_code else ""),
+        "message": f"成功转移 {len(affected_codes)} 只小鼠至 {target_room}" + (f" ({target_cage_code})" if target_cage_code else ""),
         "affected_count": len(affected_codes)
     }
 

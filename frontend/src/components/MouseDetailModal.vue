@@ -123,12 +123,19 @@
                   placeholder="如 东四105, 枫林"
                   style="width: 100%"
                   clearable
+                  @change="onEditRoomChange"
                 >
-                  <el-option v-for="r in editRoomOptions" :key="r" :label="r" :value="r" />
+                  <el-option-group label="已有鼠房">
+                    <el-option v-for="r in editRoomOptions" :key="r" :label="r" :value="r" />
+                  </el-option-group>
+                  <el-option-group v-if="editForm.owner_name" label="交给领取人管理">
+                    <el-option v-for="r in editTransferRoomOptions" :key="`transfer:${r}`" :label="r" :value="r" />
+                  </el-option-group>
                 </el-select>
+                <div v-if="isDirectHandoffRoom" class="text-xs text-gray-500 mt-1">交给领取人管理，无需记录具体笼位；保存后将移出原笼位。</div>
               </el-form-item>
 
-              <el-form-item label="所在笼位">
+              <el-form-item v-if="!isDirectHandoffRoom" label="所在笼位">
                 <el-input v-model="editForm.cage_code" placeholder="如 7A, 05-1H" />
               </el-form-item>
 
@@ -503,7 +510,7 @@
 
 <script setup>
 import { ref, reactive, computed, watch } from 'vue'
-import { miceApi, cagesApi, claimersApi, mouseStatusesApi, genotypesApi } from '@/api'
+import { miceApi, cagesApi, claimersApi, mouseStatusesApi, genotypesApi, settingsApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { useClaimerColors } from '@/composables/useClaimerColors'
 import { ElMessage } from 'element-plus'
@@ -567,6 +574,7 @@ const isEditing = ref(false)
 const saveLoading = ref(false)
 const editStrainOptions = ref([])
 const editRoomOptions = ref([])
+const editTransferRoomOptions = ref([])
 const editClaimerOptions = ref([])
 const genotypeEdits = ref([])
 let genotypeEditKey = 0
@@ -588,16 +596,26 @@ const editForm = reactive({
   notes: ''
 })
 
+const isDirectHandoffRoom = computed(() => Boolean(
+  editForm.owner_name?.trim() && editTransferRoomOptions.value.includes(editForm.source_room)
+))
+
+function onEditRoomChange() {
+  if (isDirectHandoffRoom.value) editForm.cage_code = ''
+}
+
 async function loadEditOptions() {
   try {
-    const [strains, rooms, claimers, statuses] = await Promise.all([
+    const [strains, rooms, claimers, statuses, settings] = await Promise.all([
       miceApi.getAllStrains().catch(() => []),
       cagesApi.listRooms().catch(() => []),
       claimersApi.listClaimers().catch(() => []),
-      mouseStatusesApi.listStatuses().catch(() => [])
+      mouseStatusesApi.listStatuses().catch(() => []),
+      settingsApi.getPublic().catch(() => ({ transfer_rooms: [] }))
     ])
     editStrainOptions.value = strains || []
     editRoomOptions.value = rooms || []
+    editTransferRoomOptions.value = (settings.transfer_rooms || []).filter(room => room !== '东四')
     editClaimerOptions.value = claimers || []
     ALL_STATUSES.value = (statuses || []).map(status => ({
       label: status.name,
@@ -710,7 +728,7 @@ async function saveEdit() {
       dob: editForm.dob || undefined,
       parents: editForm.parents || undefined,
       source_room: editForm.source_room || undefined,
-      cage_code: editForm.cage_code || undefined,
+      cage_code: isDirectHandoffRoom.value ? null : editForm.cage_code || undefined,
       owner_name: editForm.owner_name || undefined,
       claim_date: editForm.claim_date || undefined,
       claim_purpose: editForm.claim_purpose || undefined,

@@ -176,6 +176,7 @@ class MouseBatchTransfer(BaseModel):
     mouse_codes: Optional[List[str]] = None
     target_room: str
     target_cage_code: Optional[str] = None
+    handoff_to_owner: bool = False
     status: Optional[str] = None
     notes: Optional[str] = None
 
