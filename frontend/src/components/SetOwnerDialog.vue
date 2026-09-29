@@ -88,12 +88,18 @@
 
       <el-form-item label="转入鼠房">
         <el-select v-model="form.target_room" clearable placeholder="保持当前鼠房不变" style="width: 100%">
-          <el-option v-for="r in roomOptions" :key="r" :label="r" :value="r" />
+          <el-option-group label="已有鼠房">
+            <el-option v-for="room in roomOptions" :key="`cage:${room}`" :label="room" :value="`cage:${room}`" />
+          </el-option-group>
+          <el-option-group label="转鼠需求申请的转入鼠房（交给领取人管理）">
+            <el-option v-for="room in transferRoomOptions" :key="`transfer:${room}`" :label="room" :value="`transfer:${room}`" />
+          </el-option-group>
         </el-select>
+        <div v-if="isDirectHandoff" class="text-xs text-gray-500 mt-1">直接交给领取人管理，无需填写目标笼号；小鼠将移出原笼位。</div>
       </el-form-item>
 
-      <el-form-item label="目标笼号" v-if="form.target_room">
-        <el-input v-model="form.target_cage_code" placeholder="如 H9, 7A，不存在将自动创建" />
+      <el-form-item label="目标笼号" v-if="form.target_room && !isDirectHandoff">
+        <el-input v-model="form.target_cage_code" placeholder="如 H9, 7A；不填则移出原笼位" />
       </el-form-item>
     </el-form>
 
@@ -109,8 +115,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch } from 'vue'
-import { miceApi, claimersApi, cagesApi, mouseStatusesApi } from '@/api'
+import { ref, reactive, computed, watch } from 'vue'
+import { miceApi, claimersApi, cagesApi, mouseStatusesApi, settingsApi } from '@/api'
 import { ElMessage } from 'element-plus'
 
 const props = defineProps({
@@ -129,7 +135,10 @@ const formRef = ref(null)
 const targetMice = ref([])
 const claimerOptions = ref([])
 const roomOptions = ref([])
+const transferRoomOptions = ref([])
 const statusOptions = ref([])
+const isDirectHandoff = computed(() => form.target_room.startsWith('transfer:'))
+const selectedTargetRoom = computed(() => form.target_room.slice(form.target_room.indexOf(':') + 1))
 
 const form = reactive({
   owner_name: '',
@@ -148,6 +157,14 @@ watch(() => props.modelValue, async (val) => {
   visible.value = val
   if (val) {
     targetMice.value = [...props.mice]
+    Object.assign(form, {
+      owner_name: '',
+      claim_date: new Date().toISOString().split('T')[0],
+      claim_purpose: '',
+      status: '已领用',
+      target_room: '',
+      target_cage_code: ''
+    })
     loadOptions()
   }
 })
@@ -166,18 +183,25 @@ watch(() => form.owner_name, (ownerName) => {
   }
 })
 
+watch(() => form.target_room, () => {
+  form.target_cage_code = ''
+})
+
 async function loadOptions() {
   try {
-    const [claimers, rooms, statuses] = await Promise.all([
+    const [claimers, rooms, statuses, settings] = await Promise.all([
       claimersApi.listClaimers(),
       cagesApi.listRooms(),
-      mouseStatusesApi.listStatuses()
+      mouseStatusesApi.listStatuses(),
+      settingsApi.getPublic()
     ])
     claimerOptions.value = claimers
     roomOptions.value = rooms
+    transferRoomOptions.value = settings.transfer_rooms || []
     statusOptions.value = statuses
   } catch (e) {
     console.error('Failed to load options', e)
+    ElMessage.error('加载领取人或鼠房选项失败')
   }
 }
 
@@ -194,8 +218,8 @@ async function handleSubmit() {
         claim_date: form.claim_date,
         claim_purpose: form.claim_purpose,
         status: form.status,
-        target_room: form.target_room || undefined,
-        target_cage_code: form.target_cage_code || undefined
+        target_room: form.target_room ? selectedTargetRoom.value : undefined,
+        target_cage_code: isDirectHandoff.value ? undefined : form.target_cage_code.trim() || undefined
       })
       ElMessage.success(res.message || '领取人设置成功！')
       visible.value = false

@@ -691,9 +691,14 @@ def batch_set_owner(data: MouseBatchSetOwner, db: Session = Depends(get_db), cur
     if not clean_owner:
         raise HTTPException(status_code=400, detail="领取人姓名不能为空")
 
+    target_room = (data.target_room or "").strip() or None
+    target_cage_code = (data.target_cage_code or "").strip() or None
+    if target_cage_code and not target_room:
+        raise HTTPException(status_code=400, detail="填写目标笼号时请选择转入鼠房")
+
     claimer = db.query(Claimer).filter(Claimer.name == clean_owner).first()
     if not claimer:
-        claimer = Claimer(name=clean_owner, default_room=data.target_room)
+        claimer = Claimer(name=clean_owner, default_room=target_room)
         db.add(claimer)
         db.flush()
 
@@ -711,15 +716,15 @@ def batch_set_owner(data: MouseBatchSetOwner, db: Session = Depends(get_db), cur
 
     today_str = data.claim_date or datetime.date.today().strftime("%Y-%m-%d")
     target_cage = None
-    if data.target_cage_code and data.target_room:
+    if target_cage_code:
         target_cage = db.query(Cage).filter(
-            Cage.cage_code == data.target_cage_code.strip(),
-            Cage.room == data.target_room.strip()
+            Cage.cage_code == target_cage_code,
+            Cage.room == target_room
         ).first()
         if not target_cage:
             target_cage = Cage(
-                cage_code=data.target_cage_code.strip(),
-                room=data.target_room.strip(),
+                cage_code=target_cage_code,
+                room=target_room,
                 strain=mice[0].strain if mice else "",
                 gender=mice[0].gender if mice else "M"
             )
@@ -744,14 +749,20 @@ def batch_set_owner(data: MouseBatchSetOwner, db: Session = Depends(get_db), cur
             m.claim_purpose = data.claim_purpose
         if target_cage:
             m.cage_id = target_cage.id
-        if data.status:
+        elif target_room:
+            # Handed to the recipient without a managed destination cage.
+            m.cage_id = None
+        requested_status = data.status
+        if target_room and not target_cage and requested_status in (None, "在笼", "已领用"):
+            requested_status = "出笼"
+        if requested_status:
             try:
-                apply_mouse_status(db, m, data.status)
+                apply_mouse_status(db, m, requested_status)
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
         apply_owner_status(db, m)
-        if data.target_room:
-            m.source_room = data.target_room
+        if target_room:
+            m.source_room = target_room
 
         affected_codes.append(m.mouse_code)
 
@@ -761,9 +772,9 @@ def batch_set_owner(data: MouseBatchSetOwner, db: Session = Depends(get_db), cur
         mouse_count=len(affected_codes),
         claimer_name=claimer.name,
         source_room=", ".join(source_rooms) if source_rooms else "未知",
-        target_room=data.target_room or (target_cage.room if target_cage else ", ".join(source_rooms)),
+        target_room=target_room or ", ".join(source_rooms),
         source_cage=", ".join(source_cages) if source_cages else None,
-        target_cage=data.target_cage_code or None,
+        target_cage=target_cage_code,
         operator=current_user.display_name or current_user.username,
         date=today_str,
         status="已完成",
