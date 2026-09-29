@@ -136,6 +136,7 @@ const targetMice = ref([])
 const claimerOptions = ref([])
 const roomOptions = ref([])
 const transferRoomOptions = ref([])
+const hiddenTransferRooms = new Set(['东四'])
 const statusOptions = ref([])
 const isDirectHandoff = computed(() => form.target_room.startsWith('transfer:'))
 const selectedTargetRoom = computed(() => form.target_room.slice(form.target_room.indexOf(':') + 1))
@@ -196,8 +197,8 @@ async function loadOptions() {
       settingsApi.getPublic()
     ])
     claimerOptions.value = claimers
-    roomOptions.value = rooms
-    transferRoomOptions.value = settings.transfer_rooms || []
+    roomOptions.value = rooms.filter(room => !hiddenTransferRooms.has(room))
+    transferRoomOptions.value = (settings.transfer_rooms || []).filter(room => !hiddenTransferRooms.has(room))
     statusOptions.value = statuses
   } catch (e) {
     console.error('Failed to load options', e)
