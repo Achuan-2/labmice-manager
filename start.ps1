@@ -14,7 +14,6 @@ Write-Host "========================================================" -Foregroun
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $scriptDir
 
-Start-Process "http://localhost:8000"
 $pythonExe = Join-Path $scriptDir "backend\.venv\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $pythonExe)) {
     Write-Error "未找到后端 Python 环境。请先运行: uv sync --project backend"
@@ -22,4 +21,43 @@ if (-not (Test-Path -LiteralPath $pythonExe)) {
 }
 
 # 使用 Python 模块入口，避免 uvicorn.exe 在包含中文的项目路径下解析失败。
-& $pythonExe -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+$server = Start-Process -FilePath $pythonExe -ArgumentList @(
+    "-m", "uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"
+) -NoNewWindow -PassThru -ErrorAction Stop
+
+Write-Host "正在等待服务启动..." -ForegroundColor Cyan
+$healthUrl = "http://127.0.0.1:8000/api/health"
+$deadline = (Get-Date).AddSeconds(60)
+$ready = $false
+try {
+    while ((Get-Date) -lt $deadline) {
+        if ($server.HasExited) {
+            Write-Error "后端启动失败，退出码: $($server.ExitCode)"
+            exit 1
+        }
+
+        try {
+            $response = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 1 -ErrorAction Stop
+            if ($response.StatusCode -eq 200) {
+                $ready = $true
+                break
+            }
+        } catch {
+            # 服务尚未就绪，继续等待。
+        }
+        Start-Sleep -Milliseconds 500
+    }
+
+    if (-not $ready) {
+        Write-Error "后端在 60 秒内未就绪，请检查上方启动日志。"
+        exit 1
+    }
+
+    Start-Process "http://localhost:8000"
+    $server.WaitForExit()
+    exit $server.ExitCode
+} finally {
+    if (-not $server.HasExited) {
+        Stop-Process -Id $server.Id -ErrorAction SilentlyContinue
+    }
+}
