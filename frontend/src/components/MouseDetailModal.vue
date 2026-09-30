@@ -5,6 +5,8 @@
     width="min(840px, 94vw)"
     destroy-on-close
     class="mouse-detail-modal"
+    append-to-body
+    @closed="emit('closed')"
   >
     <div v-loading="loading" class="mouse-detail-body">
       <!-- Pedigree History Navigation Breadcrumb -->
@@ -505,7 +507,7 @@
       </div>
     </template>
   </el-dialog>
-  <CageDetailDialog v-model="showCageDetail" :cage-id="selectedCageId" @refresh="onCageChanged" @open-mouse="openCageMouse" @edit-cage="visible = false" />
+  <CageDetailDialog v-model="showCageDetail" :cage-id="selectedCageId" @refresh="onCageChanged" />
 </template>
 
 <script setup>
@@ -541,7 +543,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['update:modelValue', 'setOwner', 'refresh', 'updated'])
+const emit = defineEmits(['update:modelValue', 'setOwner', 'refresh', 'updated', 'closed'])
 
 const authStore = useAuthStore()
 const { getClaimerTagStyle } = useClaimerColors()
@@ -559,15 +561,6 @@ const selectedCageId = ref(null)
 function openCageDetail() {
   selectedCageId.value = mouse.value.cage_id
   showCageDetail.value = true
-}
-
-function openCageMouse(nextMouse) {
-  if (!nextMouse?.id) return
-  if (mouse.value && mouse.value.id !== nextMouse.id) {
-    navHistory.value.push({ code: mouse.value.mouse_code, id: mouse.value.id })
-  }
-  isEditing.value = false
-  fetchMouseData(nextMouse.mouse_code, nextMouse.id)
 }
 
 async function onCageChanged() {
@@ -905,7 +898,7 @@ watch(() => props.modelValue, (newVal) => {
     navHistory.value = []
     isEditing.value = false
   }
-})
+}, { immediate: true })
 
 watch(() => props.mouseCode, () => {
   if (visible.value) {

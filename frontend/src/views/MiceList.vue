@@ -595,7 +595,6 @@
       v-model="showCageDetail"
       :cage-id="selectedCageId"
       @refresh="onBatchSuccess"
-      @open-mouse="openMouseDetail"
     />
   </div>
 </template>

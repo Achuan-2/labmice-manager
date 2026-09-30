@@ -81,6 +81,7 @@
         <router-view />
       </main>
     </div>
+    <ArchiveDialogStack />
   </div>
 </template>
 
@@ -91,6 +92,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSettingsStore } from '@/stores/settings'
 import { todosApi } from '@/api'
 import LoginView from '@/components/LoginView.vue'
+import ArchiveDialogStack from '@/components/ArchiveDialogStack.vue'
 import { ElNotification } from 'element-plus'
 
 const route = useRoute()

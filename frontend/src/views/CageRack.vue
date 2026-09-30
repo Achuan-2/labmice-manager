@@ -1,7 +1,7 @@
 <template>
   <div class="cages-page">
     <!-- Header Controls -->
-    <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-4">
+    <div v-if="!props.dialogOnly" class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-4">
       <div class="flex flex-wrap items-center gap-3 mb-3">
         <span class="text-sm font-semibold text-gray-600">鼠房分类</span>
         <el-radio-group v-model="activeCategory" @change="changeCategory">
@@ -47,7 +47,7 @@
     </div>
 
     <!-- Cages Grid -->
-    <div v-loading="loading">
+    <div v-if="!props.dialogOnly" v-loading="loading">
       <div v-if="filteredCages.length === 0" class="bg-white p-12 text-center rounded-xl border border-gray-200 text-gray-400">
         没有找到符合条件的笼位
       </div>
@@ -196,7 +196,7 @@
     </div>
 
     <el-pagination
-      v-if="filteredCages.length > 0"
+      v-if="!props.dialogOnly && filteredCages.length > 0"
       v-model:current-page="currentPage"
       :page-size="pageSize"
       :total="filteredCages.length"
@@ -212,7 +212,7 @@
     />
 
     <!-- Add/Edit Cage Dialog -->
-    <el-dialog v-model="showCageDialog" :title="isEdit ? '编辑笼位' : '新建笼位'" width="min(720px, 94vw)" :close-on-click-modal="!cageMouseBusy" :close-on-press-escape="!cageMouseBusy" :show-close="!cageMouseBusy">
+    <el-dialog v-model="showCageDialog" :title="isEdit ? '编辑笼位' : '新建笼位'" width="min(720px, 94vw)" append-to-body :close-on-click-modal="!cageMouseBusy" :close-on-press-escape="!cageMouseBusy" :show-close="!cageMouseBusy" @closed="handleCageDialogClosed">
       <el-form :model="cageForm" label-width="80px">
         <el-form-item label="鼠房" required>
           <el-select v-model="cageForm.room" filterable allow-create placeholder="选择或输入鼠房" style="width: 100%">
@@ -614,14 +614,6 @@
       </template>
     </el-dialog>
 
-    <!-- Mouse Detail Modal -->
-    <MouseDetailModal
-      v-model="showMouseDetailModal"
-      :mouse-code="selectedMouseCode"
-      :mouse-id="selectedMouseId"
-      @set-owner="openSetOwnerFromDetail"
-      @refresh="refreshAfterMouseUpdate"
-    />
   </div>
 </template>
 
@@ -632,14 +624,20 @@ import { cagesApi, miceApi, importExportApi, settingsApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { useClaimerColors } from '@/composables/useClaimerColors'
 import SetOwnerDialog from '@/components/SetOwnerDialog.vue'
-import MouseDetailModal from '@/components/MouseDetailModal.vue'
 import StrainSelect from '@/components/StrainSelect.vue'
 import { generateSequentialMouseCodes } from '@/utils/mouseCodes'
+import { useArchiveDialogs } from '@/composables/useArchiveDialogs'
 import { Setting } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
 const router = useRouter()
+const props = defineProps({
+  dialogOnly: { type: Boolean, default: false },
+  initialCageId: { type: Number, default: null }
+})
+const emit = defineEmits(['closed', 'refresh'])
+const archiveDialogs = useArchiveDialogs()
 const authStore = useAuthStore()
 const { getClaimerTagStyle, fetchClaimerColors } = useClaimerColors()
 
@@ -709,20 +707,12 @@ function cageMatchesGender(cage, gender) {
 const showSetOwnerDialog = ref(false)
 const currentCageMice = ref([])
 
-// Mouse Detail Modal
-const showMouseDetailModal = ref(false)
-const selectedMouseCode = ref('')
-const selectedMouseId = ref(null)
-
 function openMouseDetail(m) {
-  selectedMouseCode.value = m.mouse_code
-  selectedMouseId.value = m.id || null
-  showMouseDetailModal.value = true
+  archiveDialogs.openMouse(m, refreshAfterMouseUpdate)
 }
 
-function openSetOwnerFromDetail(m) {
-  currentCageMice.value = [m]
-  showSetOwnerDialog.value = true
+function handleCageDialogClosed() {
+  if (props.dialogOnly) emit('closed')
 }
 
 async function refreshAfterMouseUpdate() {
@@ -1207,6 +1197,7 @@ watch([activeCategory, activeRoom, searchCode, onlyWithMice, cageGenderFilter, c
 }, { flush: 'sync' })
 
 watch([activeCategory, activeRoom, cageGenderFilter, cageCodeFilter], ([category, room, gender, cageCode]) => {
+  if (props.dialogOnly) return
   localStorage.setItem(cageNavigationStorageKey, JSON.stringify({ category, room, gender, cageCode }))
 })
 
@@ -1219,6 +1210,7 @@ async function loadRooms() {
     const rooms = await cagesApi.listRooms({ include_categories: true })
     roomOptions.value = rooms.map(room => room.name)
     savedRoomCategories.value = Object.fromEntries(rooms.map(room => [room.name, normalizeRoomCategory(room.category)]))
+    if (props.dialogOnly) return
     if (!roomsInitialized) {
       if (route.query.room) {
         activeRoom.value = String(route.query.room)
@@ -1379,8 +1371,13 @@ async function loadCages() {
   try {
     const params = {}
     if (activeRoom.value) params.room = activeRoom.value
-    const cages = await cagesApi.listCages(params)
-    if (requestId === cagesRequestId) cagesList.value = cages
+    const cages = props.dialogOnly
+      ? [await cagesApi.getCage(props.initialCageId)]
+      : await cagesApi.listCages(params)
+    if (requestId === cagesRequestId) {
+      cagesList.value = cages
+      if (props.dialogOnly && cagesReady) emit('refresh')
+    }
   } catch (e) {
     if (requestId === cagesRequestId) ElMessage.error('加载笼位失败')
   } finally {
@@ -1475,8 +1472,8 @@ async function submitCageForm() {
       const result = await cagesApi.batchCreateCages({ ...sharedFields, cage_codes: newCageCodes })
       ElMessage.success(result.message || `成功新增 ${newCageCodes.length} 个笼位`)
     }
+    await loadCages()
     showCageDialog.value = false
-    loadCages()
     loadRooms()
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || '保存失败')
@@ -1522,7 +1519,7 @@ async function openRequestedCage(id) {
 
 let cagesReady = false
 watch(() => route.query.edit_cage_id, id => {
-  if (id && cagesReady) openRequestedCage(id)
+  if (id && cagesReady && !props.dialogOnly) openRequestedCage(id)
 })
 
 onMounted(async () => {
@@ -1530,6 +1527,12 @@ onMounted(async () => {
   await loadRooms()
   await loadCages()
   cagesReady = true
+  if (props.dialogOnly) {
+    const cage = cagesList.value[0]
+    if (cage) openEditCageDialog(cage)
+    else emit('closed')
+    return
+  }
   await openRequestedCage(route.query.edit_cage_id)
 })
 </script>

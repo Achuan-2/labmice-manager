@@ -131,16 +131,16 @@
 
 <script setup>
 import { ref, reactive, computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { cagesApi, miceApi, settingsApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
 import StrainSelect from './StrainSelect.vue'
 import { generateSequentialMouseCodes } from '@/utils/mouseCodes'
+import { useArchiveDialogs } from '@/composables/useArchiveDialogs'
 
 const props = defineProps({ modelValue: Boolean, cageId: Number })
-const emit = defineEmits(['update:modelValue', 'refresh', 'open-mouse', 'edit-cage'])
-const router = useRouter()
+const emit = defineEmits(['update:modelValue', 'refresh'])
+const archiveDialogs = useArchiveDialogs()
 const authStore = useAuthStore()
 const visible = computed({ get: () => props.modelValue, set: value => emit('update:modelValue', value) })
 const cage = ref(null)
@@ -188,16 +188,12 @@ function handleSelectionChange(selection) {
 }
 
 function openMouse(mouse) {
-  visible.value = false
-  emit('open-mouse', mouse)
+  archiveDialogs.openMouse(mouse, refreshCage)
 }
 
 function editCage() {
   if (!cage.value?.id || !authStore.isAdmin || busy.value) return
-  const cageId = cage.value.id
-  visible.value = false
-  emit('edit-cage', cageId)
-  router.push({ path: '/cages', query: { edit_cage_id: String(cageId) } })
+  archiveDialogs.openCageEditor(cage.value.id, refreshCage)
 }
 
 async function refreshCage() {
