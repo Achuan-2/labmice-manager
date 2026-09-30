@@ -15,9 +15,10 @@
           placeholder="按领取人筛选"
           clearable
           style="width: 160px"
-          @keyup.enter="loadTransfers"
+          @keyup.enter="searchTransfers"
+          @clear="searchTransfers"
         />
-        <el-select v-model="filters.action_type" clearable placeholder="全部操作类型" style="width: 140px" @change="loadTransfers">
+        <el-select v-model="filters.action_type" clearable placeholder="全部操作类型" style="width: 140px" @change="searchTransfers">
           <el-option label="新增小鼠" value="新增小鼠" />
           <el-option label="设置领取人" value="设置领取人" />
           <el-option label="转鼠/领用" value="转鼠/领用" />
@@ -28,7 +29,7 @@
           <el-option label="交付领取人" value="转鼠/交付领取人" />
           <el-option label="状态变更" value="状态变更" />
         </el-select>
-        <el-button type="primary" @click="loadTransfers">查询</el-button>
+        <el-button type="primary" @click="searchTransfers">查询</el-button>
       </div>
     </div>
 
@@ -118,6 +119,16 @@
           </template>
         </el-table-column>
       </el-table>
+      <div class="p-3 border-t border-gray-100 flex justify-end">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="pageSize"
+          :total="total"
+          :page-sizes="[20, 50, 100, 200]"
+          layout="total, sizes, prev, pager, next, jumper"
+          @size-change="page = 1"
+        />
+      </div>
     </div>
 
     <!-- Mouse Detail Modal -->
@@ -129,7 +140,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import { transfersApi } from '@/api'
 import { useClaimerColors } from '@/composables/useClaimerColors'
 import MouseDetailModal from '@/components/MouseDetailModal.vue'
@@ -139,6 +150,10 @@ const { getClaimerTagStyle, fetchClaimerColors } = useClaimerColors()
 
 const loading = ref(false)
 const transfers = ref([])
+const total = ref(0)
+const page = ref(1)
+const pageSize = ref(50)
+let loadRequestId = 0
 
 // Mouse Detail Modal
 const showMouseDetailModal = ref(false)
@@ -160,19 +175,35 @@ const filters = reactive({
 })
 
 async function loadTransfers() {
+  const requestId = ++loadRequestId
   loading.value = true
   try {
     const params = {
+      page: page.value,
+      page_size: pageSize.value,
       claimer_name: filters.claimer_name || undefined,
       action_type: filters.action_type || undefined
     }
-    transfers.value = await transfersApi.listTransfers(params)
+    const result = await transfersApi.listTransfers(params)
+    if (requestId !== loadRequestId) return
+    transfers.value = result.items
+    total.value = result.total
   } catch (e) {
-    ElMessage.error('加载变动日志失败')
+    if (requestId === loadRequestId) ElMessage.error('加载变动日志失败')
   } finally {
-    loading.value = false
+    if (requestId === loadRequestId) loading.value = false
   }
 }
+
+function searchTransfers() {
+  if (page.value === 1) {
+    loadTransfers()
+  } else {
+    page.value = 1
+  }
+}
+
+watch([page, pageSize], loadTransfers)
 
 onMounted(() => {
   fetchClaimerColors()

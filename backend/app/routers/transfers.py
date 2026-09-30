@@ -1,20 +1,21 @@
-from typing import List, Optional
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from backend.app.database import get_db
 from backend.app.models.models import TransferLog, User
-from backend.app.schemas.schemas import TransferLogResponse, TransferLogCreate
+from backend.app.schemas.schemas import TransferLogResponse, TransferLogCreate, TransferLogPageResponse
 from backend.app.auth import require_auth, require_admin
 
 router = APIRouter(prefix="/api/transfers", tags=["Transfers"])
 
-@router.get("", response_model=List[TransferLogResponse])
+@router.get("", response_model=TransferLogPageResponse)
 def list_transfers(
     claimer_name: Optional[str] = None,
     action_type: Optional[str] = None,
     status: Optional[str] = None,
-    limit: int = Query(100, ge=1, le=500),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth)
 ):
@@ -26,7 +27,14 @@ def list_transfers(
     if status:
         query = query.filter(TransferLog.status == status)
 
-    return query.order_by(TransferLog.id.desc()).limit(limit).all()
+    total = query.count()
+    items = (
+        query.order_by(TransferLog.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 @router.post("", response_model=TransferLogResponse)
 def create_transfer_log(data: TransferLogCreate, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):

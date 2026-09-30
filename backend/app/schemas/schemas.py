@@ -377,6 +377,12 @@ class TransferLogResponse(TransferLogCreate):
     class Config:
         from_attributes = True
 
+class TransferLogPageResponse(BaseModel):
+    items: List[TransferLogResponse]
+    total: int
+    page: int
+    page_size: int
+
 # --- Primer ---
 class PrimerBase(BaseModel):
     primer_no: Optional[int] = None
