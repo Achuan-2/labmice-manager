@@ -110,6 +110,7 @@
       v-model="showCageDetail"
       :cage-id="selectedCageId"
       @refresh="handleCageRefresh"
+      @open-mouse="openMouse"
     />
   </div>
 </template>

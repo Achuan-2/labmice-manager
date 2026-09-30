@@ -51,7 +51,7 @@ const routes = [
     path: '/transfers',
     name: 'Transfers',
     component: () => import('@/views/Transfers.vue'),
-    meta: { title: '领用与流转日志' }
+    meta: { title: '变动日志' }
   },
   {
     path: '/import-export',

@@ -431,10 +431,10 @@
             </div>
           </div>
 
-          <!-- Section 3: Transfer & Cage Logs (流转记录) -->
+          <!-- Section 3: Mouse change logs -->
           <div v-if="mouse.transfer_logs && mouse.transfer_logs.length > 0">
             <div class="text-xs font-bold text-gray-700 mb-2 flex items-center gap-1.5">
-              <span>📋 流转与领用日志 ({{ mouse.transfer_logs.length }})</span>
+              <span>📋 变动日志 ({{ mouse.transfer_logs.length }})</span>
             </div>
             <div class="space-y-1.5 max-h-[120px] overflow-y-auto pr-1">
               <div
@@ -451,7 +451,7 @@
                     <template v-if="log.source_room || log.source_cage">{{ log.source_room }} {{ log.source_cage }}</template>
                     <template v-if="log.target_room || log.target_cage">
                       <span v-if="log.source_room || log.source_cage"> → </span>
-                      <span v-else>转移至: </span>
+                      <span v-else>{{ log.action_type === '新增小鼠' ? '新增于: ' : '转移至: ' }}</span>
                       {{ log.target_room }} {{ log.target_cage }}
                     </template>
                   </span>
@@ -505,7 +505,7 @@
       </div>
     </template>
   </el-dialog>
-  <CageDetailDialog v-model="showCageDetail" :cage-id="selectedCageId" @refresh="onCageChanged" />
+  <CageDetailDialog v-model="showCageDetail" :cage-id="selectedCageId" @refresh="onCageChanged" @open-mouse="openCageMouse" @edit-cage="visible = false" />
 </template>
 
 <script setup>
@@ -559,6 +559,15 @@ const selectedCageId = ref(null)
 function openCageDetail() {
   selectedCageId.value = mouse.value.cage_id
   showCageDetail.value = true
+}
+
+function openCageMouse(nextMouse) {
+  if (!nextMouse?.id) return
+  if (mouse.value && mouse.value.id !== nextMouse.id) {
+    navHistory.value.push({ code: mouse.value.mouse_code, id: mouse.value.id })
+  }
+  isEditing.value = false
+  fetchMouseData(nextMouse.mouse_code, nextMouse.id)
 }
 
 async function onCageChanged() {

@@ -134,7 +134,7 @@
           <template #default="{ row }">
             <div
               class="inline-flex items-center cursor-pointer text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2 py-1 rounded transition-colors group"
-              title="点击查看小鼠完整档案、系谱及流转记录"
+              title="点击查看小鼠完整档案、系谱及变动记录"
               @click="openMouseDetail(row)"
             >
               <span class="font-bold font-mono text-sm underline-offset-2 group-hover:underline">
@@ -595,6 +595,7 @@
       v-model="showCageDetail"
       :cage-id="selectedCageId"
       @refresh="onBatchSuccess"
+      @open-mouse="openMouseDetail"
     />
   </div>
 </template>

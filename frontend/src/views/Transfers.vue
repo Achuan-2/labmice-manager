@@ -3,9 +3,9 @@
     <!-- Header -->
     <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-4 flex items-center justify-between">
       <div>
-        <div class="text-base font-bold text-gray-800">小鼠领用与流转流水日志</div>
+        <div class="text-base font-bold text-gray-800">变动日志</div>
         <div class="text-xs text-gray-500 mt-1">
-          记录系统内所有领取人指定、鼠房转移、换笼与状态变更历史，全流程可追溯
+          记录新增小鼠、领取人指定、鼠房转移、换笼与状态变更，方便追溯
         </div>
       </div>
 
@@ -18,11 +18,14 @@
           @keyup.enter="loadTransfers"
         />
         <el-select v-model="filters.action_type" clearable placeholder="全部操作类型" style="width: 140px" @change="loadTransfers">
+          <el-option label="新增小鼠" value="新增小鼠" />
           <el-option label="设置领取人" value="设置领取人" />
           <el-option label="转鼠/领用" value="转鼠/领用" />
           <el-option label="转鼠审批" value="转鼠/审批处理" />
           <el-option label="撤销分配/回笼" value="撤销分配/回笼" />
           <el-option label="转房/换笼" value="转房/换笼" />
+          <el-option label="批量换笼" value="批量换笼" />
+          <el-option label="交付领取人" value="转鼠/交付领取人" />
           <el-option label="状态变更" value="状态变更" />
         </el-select>
         <el-button type="primary" @click="loadTransfers">查询</el-button>
@@ -42,7 +45,7 @@
           <template #default="{ row }">
             <el-tag
               size="small"
-              :type="row.action_type.includes('设置') ? 'success' : (row.action_type.includes('转') ? 'primary' : 'info')"
+              :type="row.action_type.includes('新增') || row.action_type.includes('设置') ? 'success' : (row.action_type.includes('转') ? 'primary' : 'info')"
             >
               {{ row.action_type }}
             </el-tag>
@@ -85,10 +88,10 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="转出 → 转入" min-width="180">
+        <el-table-column label="位置变化" min-width="180">
           <template #default="{ row }">
             <div class="text-xs flex items-center gap-1">
-              <span class="text-gray-500">{{ row.source_room || '未记录鼠房' }}</span>
+              <span class="text-gray-500">{{ row.source_room || (row.action_type === '新增小鼠' ? '新增' : '未记录鼠房') }}</span>
               <span v-if="row.source_cage" class="text-amber-600 font-mono font-bold">({{ row.source_cage }})</span>
               <template v-if="row.target_room || row.target_cage">
                 <span class="text-gray-400">→</span>
@@ -165,7 +168,7 @@ async function loadTransfers() {
     }
     transfers.value = await transfersApi.listTransfers(params)
   } catch (e) {
-    ElMessage.error('加载流转日志失败')
+    ElMessage.error('加载变动日志失败')
   } finally {
     loading.value = false
   }

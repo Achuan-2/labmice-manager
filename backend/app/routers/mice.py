@@ -58,6 +58,24 @@ def next_available_mouse_code(db: Session, requested_code: str, occupied_codes: 
             return candidate
         suffix_number += 1
 
+
+def record_mouse_creation(
+    db: Session, mouse_codes: List[str], owner_name: Optional[str],
+    room: Optional[str], cage_code: Optional[str], current_user: User,
+) -> None:
+    db.add(TransferLog(
+        action_type="新增小鼠",
+        mouse_codes=", ".join(mouse_codes),
+        mouse_count=len(mouse_codes),
+        claimer_name=owner_name,
+        target_room=room,
+        target_cage=cage_code,
+        operator=current_user.display_name or current_user.username,
+        date=datetime.date.today().isoformat(),
+        status="已完成",
+        notes="新增小鼠档案",
+    ))
+
 @router.post("/parse-parents")
 def parse_parents_endpoint(
     data: ParentsParseRequest,
@@ -457,6 +475,12 @@ def create_mouse(data: MouseCreate, db: Session = Depends(get_db), current_user:
         GenotypeRecord.mouse_code == mouse.mouse_code,
         GenotypeRecord.mouse_id.is_(None),
     ).update({"mouse_id": mouse.id}, synchronize_session="fetch")
+    target_cage = db.get(Cage, mouse.cage_id) if mouse.cage_id else None
+    record_mouse_creation(
+        db, [mouse.mouse_code], mouse.owner_name,
+        target_cage.room if target_cage else mouse.source_room,
+        target_cage.cage_code if target_cage else None, current_user,
+    )
     db.commit()
     db.refresh(mouse)
     result = enrich_mouse_response(mouse)
@@ -538,6 +562,12 @@ def batch_create_mice(
         db.add(m)
         created_mice.append(code)
 
+    target_cage = db.get(Cage, cage_id) if cage_id and not status.removes_from_cage else None
+    record_mouse_creation(
+        db, created_mice, owner_name,
+        target_cage.room if target_cage else data.source_room,
+        target_cage.cage_code if target_cage else None, current_user,
+    )
     db.commit()
 
     msg = f"成功批量新增 {len(created_mice)} 只小鼠"

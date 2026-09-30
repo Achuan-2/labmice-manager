@@ -120,7 +120,7 @@
               >
                 <div
                   class="mouse-summary flex items-center gap-1.5 cursor-pointer text-blue-700 hover:text-blue-900 group"
-                  title="点击查看该小鼠详细档案、父母系谱及流转记录"
+                  title="点击查看该小鼠详细档案、父母系谱及变动记录"
                   @click.stop="openMouseDetail(m)"
                 >
                   <span class="font-mono font-bold group-hover:underline">{{ m.mouse_code }}</span>
@@ -405,7 +405,7 @@
       :show-close="!batchEditBusy"
     >
       <div class="text-sm text-gray-500 mb-4 break-all">已选择：{{ batchEditingMice.map(mouse => mouse.mouse_code).join('、') }}</div>
-      <el-form class="batch-edit-form" label-width="140px" :disabled="batchEditBusy">
+      <el-form class="batch-edit-form" label-position="left" label-width="140px" :disabled="batchEditBusy">
         <el-form-item>
           <template #label><el-checkbox v-model="batchEditForm.updateStrain">修改品系</el-checkbox></template>
           <StrainSelect
@@ -491,7 +491,7 @@
           </el-select>
         </el-form-item>
       </el-form>
-      <div class="text-xs text-gray-500">{{ isDirectHandoffMove ? '直接交给领取人管理，无需目标笼位；小鼠将移出原笼位。' : '换笼完成后会自动写入“领用与流转日志”。' }}</div>
+      <div class="text-xs text-gray-500">{{ isDirectHandoffMove ? '直接交给领取人管理，无需目标笼位；小鼠将移出原笼位。' : '换笼完成后会自动写入“变动日志”。' }}</div>
       <template #footer>
         <el-button :disabled="movingMouseBusy" @click="showMoveMouseDialog = false">取消</el-button>
         <el-button type="primary" :loading="movingMouseBusy" @click="submitMoveMouse">{{ isDirectHandoffMove ? '确认交接' : '确认换笼' }}{{ movingMice.length > 1 ? `（${movingMice.length} 只）` : '' }}</el-button>
@@ -1146,7 +1146,7 @@ async function submitMoveMouse() {
     editingCageMice.value = editingCageMice.value.filter(item => !movingIds.has(item.id))
     selectedEditingCageMice.value = []
     showMoveMouseDialog.value = false
-    ElMessage.success(result.message || '换笼成功，已写入流转日志')
+    ElMessage.success(result.message || '换笼成功，已写入变动日志')
     await loadCages()
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || '换笼失败')
@@ -1505,23 +1505,32 @@ async function handleExport() {
   }
 }
 
+async function openRequestedCage(id) {
+  const requestedId = Number(id)
+  if (!requestedId) return
+  try {
+    const cage = cagesList.value.find(item => item.id === requestedId) || await cagesApi.getCage(requestedId)
+    openEditCageDialog(cage)
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '笼位不存在或无法加载')
+  } finally {
+    const query = { ...route.query }
+    delete query.edit_cage_id
+    router.replace({ path: route.path, query })
+  }
+}
+
+let cagesReady = false
+watch(() => route.query.edit_cage_id, id => {
+  if (id && cagesReady) openRequestedCage(id)
+})
+
 onMounted(async () => {
   fetchClaimerColors()
   await loadRooms()
   await loadCages()
-  const requestedId = Number(route.query.edit_cage_id)
-  if (requestedId) {
-    try {
-      const cage = cagesList.value.find(item => item.id === requestedId) || await cagesApi.getCage(requestedId)
-      openEditCageDialog(cage)
-    } catch (e) {
-      ElMessage.error(e.response?.data?.detail || '待办关联的笼位不存在')
-    } finally {
-      const query = { ...route.query }
-      delete query.edit_cage_id
-      router.replace({ path: route.path, query })
-    }
-  }
+  cagesReady = true
+  await openRequestedCage(route.query.edit_cage_id)
 })
 </script>
 

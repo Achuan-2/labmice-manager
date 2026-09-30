@@ -152,7 +152,7 @@ const navItems = [
   { path: '/transfer-requests', label: '转鼠需求及反馈', icon: 'Tickets' },
   { path: '/genotypes', label: '基因鉴定结果', icon: 'Aim' },
   { path: '/members', label: '课题组成员', icon: 'User' },
-  { path: '/transfers', label: '领用与流转日志', icon: 'Sort' },
+  { path: '/transfers', label: '变动日志', icon: 'Sort' },
   { path: '/import-export', label: '数据导入导出', icon: 'Document' },
   { path: '/admins', label: '管理员设置', icon: 'Setting', adminOnly: true },
 ]
