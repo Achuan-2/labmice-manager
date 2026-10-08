@@ -1,5 +1,4 @@
 import re
-from collections import defaultdict
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -7,44 +6,6 @@ from backend.app.models.models import Strain, Mouse, Cage, GenotypeRecord
 
 TRIPLE_TRANSGENIC_STRAIN = "Camk2/Ai93-Ras-N"
 TRIPLE_TRANSGENIC_RAS_STRAIN = "Camk2/Ai93-Ras"
-KNOWN_FOUNDER_STRAINS = {"C663": "TH-cre"}
-# Confirmed by the source Excel or the user. Startup normalization fills blanks only.
-KNOWN_MOUSE_STRAINS = {
-    "E794": TRIPLE_TRANSGENIC_STRAIN,
-    "E798": TRIPLE_TRANSGENIC_STRAIN,
-    **{code: TRIPLE_TRANSGENIC_RAS_STRAIN for code in ("E163", "E164", "E165", "E166", "E167", "E168", "E169")},
-    **{code: "TH-cre" for code in (
-        "C283", "C284", "C285", "C286", "C287", "C288",
-        "C479", "C565", "C566", "C664", "C665", "C666", "C667", "C668",
-        "C811", "C812", "C813",
-    )},
-    **{code: "Ras" for code in (
-        "B778", "B779", "B780", "B781", "B782", "B783", "B784", "B785", "B786", "B787", "B788",
-        "C669", "C670", "C671", "C672", "C673", "C674",
-        "C712", "C713", "C714", "C715",
-        "C814", "C815", "C816", "C817", "C818", "C819", "C820", "C821", "C822", "C823",
-        "C990", "C991", "C992", "C993", "C994", "C995", "C996", "C997",
-        "E073", "E074", "E075", "E076", "E077", "E078", "E079",
-    )},
-    **{code: "RAS-N" for code in (
-        "C790", "C791", "C792", "C793", "C794", "C795", "C796",
-        "C915", "C916", "C917", "C918", "C919", "C920", "C921", "C922", "C923",
-        "C968", "C969", "C970", "C971", "C972",
-        "E019", "E020", "E021", "E022", "E023", "E024", "E025", "E026", "E027",
-        "E087", "E088", "E089", "E090", "E091", "E092",
-        "E987", "E988", "E989", "E990", "E991", "E992",
-    )},
-    **{code: "JAX-5XFAD-J" for code in (
-        "159", "265", "266", "267", "269", "300", "B12", "B111", "B113", "B114",
-        "B152", "B153", "B156", "B157", "B160", "B161",
-        "B829", "B830", "B831", "B832", "B833", "B834", "B835", "B836", "B837", "B838",
-    )},
-    **{code: "Rasgrf2-T2A-dCre" for code in (
-        "B252", "B253", "B254", "B255", "B256", "B257",
-        "B297", "B298", "B299", "B300", "B301", "B302", "B303", "B304",
-    )},
-}
-
 # Canonical laboratory nomenclature mappings for case merging
 CANONICAL_STRAIN_MAP = {
     "camk2/ai93-ras-n": TRIPLE_TRANSGENIC_STRAIN,
@@ -125,59 +86,6 @@ def backfill_triple_transgenic_strains(db: Session) -> int:
     return repaired
 
 
-def _pedigree_parent_codes(parents: Optional[str]) -> set[str]:
-    """Read complete ear tags, allowing an optional trailing M/F gender marker."""
-    text = re.sub(r"[（(][^）)]*[）)]", "", str(parents or ""))
-    codes = set()
-    for token in re.split(r"[+、/,，;；\s\\]+", text):
-        if re.fullmatch(r"[A-Za-z0-9_-]+", token) and re.search(r"\d", token):
-            codes.add(re.sub(r"(?<=\d)[MFmf]$", "", token).upper())
-    return codes
-
-
-def backfill_known_pedigree_strains(db: Session) -> int:
-    """Fill missing strains for confirmed mice and families using exact ear tags."""
-    rows_by_code = defaultdict(list)
-    children_by_parent = defaultdict(set)
-    repaired = 0
-    repaired_strains = set()
-    for row in [*db.query(Mouse).all(), *db.query(GenotypeRecord).all()]:
-        code = row.mouse_code.strip().upper()
-        # Specific confirmed mice may differ from their parents' combined strain.
-        known_strain = KNOWN_MOUSE_STRAINS.get(code)
-        if known_strain and not (row.strain or "").strip():
-            row.strain = known_strain
-            repaired += 1
-            repaired_strains.add(known_strain)
-        rows_by_code[code].append(row)
-        for parent in _pedigree_parent_codes(row.parents):
-            children_by_parent[parent].add(code)
-
-    for founder, strain in KNOWN_FOUNDER_STRAINS.items():
-        pending = [founder]
-        visited = set()
-        while pending:
-            code = pending.pop()
-            if code in visited:
-                continue
-            visited.add(code)
-            rows = rows_by_code.get(code, [])
-            # An explicitly different strain marks a cross; do not infer along that branch.
-            if any((row.strain or "").strip() and row.strain.strip().casefold() != strain.casefold() for row in rows):
-                continue
-            for row in rows:
-                if not (row.strain or "").strip():
-                    row.strain = strain
-                    repaired += 1
-            pending.extend(children_by_parent.get(code, ()))
-        if any((row.strain or "").casefold() == strain.casefold() for code in visited for row in rows_by_code.get(code, [])):
-            get_or_create_strain_record(db, strain)
-    for strain in repaired_strains:
-        get_or_create_strain_record(db, strain)
-    db.flush()
-    return repaired
-
-
 def get_or_create_strain_record(db: Session, target_name: str) -> Strain:
     """Safely get or create a Strain record without IntegrityError on unique name constraint"""
     target_name = target_name.strip()
@@ -250,7 +158,6 @@ def sync_and_normalize_all_strains(db: Session) -> Dict[str, Any]:
     """
     merged_count = 0
     repaired_count = backfill_triple_transgenic_strains(db)
-    repaired_count += backfill_known_pedigree_strains(db)
 
     # 1. Gather all strains currently in mice, cages, genotypes
     mice_strains = db.query(Mouse.strain).filter(Mouse.strain != "").distinct().all()

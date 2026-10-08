@@ -7,7 +7,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from backend.app.models.models import Mouse, Cage, Claimer, TransferLog, Primer, GenotypeRecord, TransferRequest
-from backend.app.services.strain_service import backfill_known_pedigree_strains, infer_strain_from_genotypes, normalize_strain_name
+from backend.app.services.strain_service import infer_strain_from_genotypes, normalize_strain_name
 from backend.app.services.owner_service import sync_euthanasia_owner
 
 INFERRED_PARENT_PLACEHOLDER_NOTE = "由基因鉴定父母关系推测录入"
@@ -993,7 +993,6 @@ def import_single_excel_file(db: Session, file_path: str, original_filename: str
     cleanup_synthetic_room_imports(db)
     cleanup_invalid_genotype_mice(db)
     results["out_of_cage_updated"] = normalize_cage_statuses(db)
-    results["strains_repaired"] = backfill_known_pedigree_strains(db)
 
     db.commit()
     return results
@@ -1039,7 +1038,6 @@ def import_local_excel_folder(db: Session, folder_path: str) -> Dict[str, Any]:
     cleanup_synthetic_room_imports(db)
     cleanup_invalid_genotype_mice(db)
     results["out_of_cage_updated"] = normalize_cage_statuses(db)
-    results["strains_repaired"] = backfill_known_pedigree_strains(db)
 
     db.commit()
     return results

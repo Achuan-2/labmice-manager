@@ -91,10 +91,8 @@ def startup_event():
         if any(invalid_mice_cleanup.values()):
             print(f"Cleaned invalid genotype mice: {invalid_mice_cleanup}")
         
-        # Repair confirmed missing strains and merge case discrepancies on every startup.
-        strain_sync = sync_and_normalize_all_strains(db)
-        if strain_sync["repaired_count"]:
-            print(f"Automatically repaired {strain_sync['repaired_count']} missing strain fields.")
+        # Merge case discrepancies for existing strains
+        sync_and_normalize_all_strains(db)
         sync_mouse_statuses(db)
         sync_euthanasia_owner(db)
         db.query(Room).filter(Room.category == "使用鼠房").update(

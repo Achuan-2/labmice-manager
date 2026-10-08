@@ -1,4 +1,4 @@
-"""Exercise real startup against an isolated deployment database, without Excel files."""
+"""Ensure startup does not fill strains from individual ear-tag exceptions."""
 import os
 from pathlib import Path
 import subprocess
@@ -8,7 +8,7 @@ import unittest
 
 
 class StartupStrainRepairTests(unittest.TestCase):
-    def test_existing_deployment_repairs_on_startup_without_reimport(self):
+    def test_existing_deployment_does_not_apply_ear_tag_specific_repairs(self):
         script = r'''
 from backend.app.main import startup_event
 from backend.app.database import SessionLocal
@@ -24,7 +24,7 @@ with SessionLocal() as db:
                  dob='2026-04-15', status='出笼'))
     db.commit()
 
-# A nonempty deployment must repair without calling either Excel import or loading.
+# Starting an existing deployment must not reimport Excel or infer by ear tag.
 from unittest.mock import patch
 with patch('backend.app.main.import_local_excel_folder', side_effect=AssertionError('Unexpected reimport')), \
      patch('openpyxl.load_workbook', side_effect=AssertionError('Unexpected Excel access')):
@@ -34,7 +34,7 @@ with patch('backend.app.main.import_local_excel_folder', side_effect=AssertionEr
         assert db.query(GenotypeRecord).count() == 2
         for model in (Mouse, GenotypeRecord):
             row = db.query(model).filter_by(mouse_code='B829').one()
-            assert row.strain == 'JAX-5XFAD-J' and row.genotype_1 == 'WT'
+            assert row.strain == '' and row.genotype_1 == 'WT'
             assert row.dob == '2023-01-10' and row.test_date == '2023-02-07'
             assert db.query(model).filter_by(mouse_code='B830').one().strain == '人工确认品系'
         assert db.query(Mouse).filter_by(mouse_code='B829').one().notes == '保留备注'
@@ -52,7 +52,7 @@ with patch('backend.app.main.import_local_excel_folder', side_effect=AssertionEr
             for model in (Mouse, GenotypeRecord)
         }
         assert before == after, 'Repeated startup changed the repaired records'
-print('startup repair verified without Excel import')
+print('startup preserves existing records without ear-tag repair')
 '''
         with tempfile.TemporaryDirectory() as directory:
             environment = dict(os.environ, DATA_DIR=directory, PYTHONUTF8="1",
@@ -63,8 +63,8 @@ print('startup repair verified without Excel import')
                 env=environment, capture_output=True, text=True, encoding="utf-8", timeout=60,
             )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("Automatically repaired 2 missing strain fields.", result.stdout)
-        self.assertIn("startup repair verified without Excel import", result.stdout)
+        self.assertNotIn("Automatically repaired", result.stdout)
+        self.assertIn("startup preserves existing records without ear-tag repair", result.stdout)
 
 
 if __name__ == "__main__":
