@@ -272,9 +272,18 @@
         </el-form-item>
       </el-form>
       <section v-if="isEdit" class="mt-4 border-t border-gray-200 pt-4">
-        <div class="flex items-center justify-between mb-2">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
           <span class="font-semibold">在笼小鼠（{{ editingCageMice.length }} 只）</span>
-          <div class="flex items-center gap-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <el-button
+              type="success"
+              plain
+              size="small"
+              :disabled="cageMouseBusy || selectedEditingCageMice.length === 0"
+              @click="openSetOwnerForSelectedMice"
+            >
+              指定领取人{{ selectedEditingCageMice.length ? `（${selectedEditingCageMice.length}）` : '' }}
+            </el-button>
             <el-button
               type="warning"
               plain
@@ -296,7 +305,7 @@
             <el-button type="primary" size="small" :disabled="cageMouseBusy" @click="openAddCageMouse()">新增鼠</el-button>
           </div>
         </div>
-        <div class="text-xs text-gray-500 mb-2">点击小鼠编号可查看和编辑档案；勾选小鼠可批量修改品系、出生日期、性别或批量换笼。新增、编辑、换笼和移除立即生效。移除只清除当前笼位，小鼠档案、基因鉴定、领取人与历史记录均保留。</div>
+        <div class="text-xs text-gray-500 mb-2">点击小鼠编号可查看和编辑档案；勾选小鼠可批量指定领取人、修改品系、出生日期、性别或换笼。新增、指定领取人、编辑、换笼和移除立即生效。移除只清除当前笼位，小鼠档案、基因鉴定、领取人与历史记录均保留。</div>
         <el-table :data="editingCageMice" max-height="240" empty-text="当前笼位暂无小鼠" @selection-change="handleEditingCageSelection">
           <el-table-column type="selection" width="44" />
           <el-table-column prop="mouse_code" label="小鼠编号" min-width="100">
@@ -1386,16 +1395,28 @@ async function loadCages() {
 }
 
 function openSetOwnerForCage(cage) {
+  openSetOwnerForMice(cage.mice)
+}
+
+function openSetOwnerForSelectedMice() {
+  if (cageMouseBusy.value) return
+  openSetOwnerForMice(selectedEditingCageMice.value)
+}
+
+function openSetOwnerForMice(mice) {
   if (!authStore.isAdmin) {
     ElMessage.warning('需管理员登录后操作')
     return
   }
-  currentCageMice.value = [...cage.mice]
+  const targets = mice.filter(mouse => mouse?.id)
+  if (!targets.length) return ElMessage.warning('请先选择需要指定领取人的小鼠')
+  currentCageMice.value = [...targets]
   showSetOwnerDialog.value = true
 }
 
 async function onSetOwnerSuccess() {
   await refreshAfterMouseUpdate()
+  window.dispatchEvent(new Event('todos-updated'))
 }
 
 function openAddCageDialog() {

@@ -9,12 +9,13 @@
         <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
           <span class="font-semibold">在笼小鼠（{{ cage.mice.length }} 只）</span>
           <div v-if="authStore.isAdmin" class="flex flex-wrap gap-2">
+            <el-button type="success" plain size="small" :disabled="busy || !selectedMice.length" @click="openSetOwner">指定领取人{{ selectedMice.length ? `（${selectedMice.length}）` : '' }}</el-button>
             <el-button type="warning" plain size="small" :disabled="busy || !selectedMice.length" @click="openBatchEdit">批量编辑{{ selectedMice.length ? `（${selectedMice.length}）` : '' }}</el-button>
             <el-button type="primary" plain size="small" :disabled="busy || !selectedMice.length" @click="openMove(selectedMice)">批量换笼{{ selectedMice.length ? `（${selectedMice.length}）` : '' }}</el-button>
             <el-button type="primary" size="small" :disabled="busy" @click="openAdd">新增鼠</el-button>
           </div>
         </div>
-        <div class="text-xs text-gray-500 mb-3">点击编号可查看和编辑档案；勾选小鼠可批量编辑或换笼。移除只解除当前笼位关联，小鼠档案、领取人及历史记录均保留。</div>
+        <div class="text-xs text-gray-500 mb-3">点击编号可查看和编辑档案；勾选小鼠可批量指定领取人、编辑或换笼。移除只解除当前笼位关联，小鼠档案、领取人及历史记录均保留。</div>
         <el-table :data="cage.mice" max-height="360" empty-text="当前为空笼" @selection-change="handleSelectionChange">
           <el-table-column v-if="authStore.isAdmin" type="selection" width="44" />
           <el-table-column prop="mouse_code" label="小鼠编号" min-width="105">
@@ -72,6 +73,8 @@
     </div>
     <template #footer><el-button :disabled="busy" @click="visible = false">关闭</el-button></template>
   </el-dialog>
+
+  <SetOwnerDialog v-model="settingOwner" :mice="ownerMice" @success="refreshCage" />
 
   <el-dialog v-model="editingBatch" :title="`批量编辑小鼠（${selectedMice.length}只）`" width="min(520px, 94vw)" append-to-body :close-on-click-modal="false" :close-on-press-escape="!busy" :show-close="!busy">
     <div class="text-sm text-gray-500 mb-4 break-all">已选择：{{ selectedMice.map(mouse => mouse.mouse_code).join('、') }}</div>
@@ -135,6 +138,7 @@ import { cagesApi, miceApi, settingsApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
 import StrainSelect from './StrainSelect.vue'
+import SetOwnerDialog from './SetOwnerDialog.vue'
 import { generateSequentialMouseCodes } from '@/utils/mouseCodes'
 import { useArchiveDialogs } from '@/composables/useArchiveDialogs'
 
@@ -148,6 +152,8 @@ const loading = ref(false)
 const busy = ref(false)
 const adding = ref(false)
 const selectedMice = ref([])
+const settingOwner = ref(false)
+const ownerMice = ref([])
 const editingBatch = ref(false)
 const batchEditForm = reactive({ updateStrain: false, strain: '', updateDob: false, dob: '', updateGender: false, gender: '' })
 const moving = ref(false)
@@ -179,12 +185,19 @@ async function loadCage() {
 }
 
 watch(() => [props.modelValue, props.cageId], ([open, id]) => {
+  settingOwner.value = false
   if (open && id) { adding.value = false; loadCage() }
   else { adding.value = false; editingBatch.value = false; moving.value = false; requestId++; loading.value = false }
 }, { immediate: true })
 
 function handleSelectionChange(selection) {
   selectedMice.value = selection
+}
+
+function openSetOwner() {
+  if (busy.value || !selectedMice.value.length || !authStore.isAdmin) return
+  ownerMice.value = [...selectedMice.value]
+  settingOwner.value = true
 }
 
 function openMouse(mouse) {

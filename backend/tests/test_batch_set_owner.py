@@ -49,6 +49,36 @@ class BatchSetOwnerTests(unittest.TestCase):
         self.assertEqual(self.mouse.cage_id, self.source_cage.id)
         self.assertEqual(self.mouse.status, "已领用")
 
+    def test_assigns_only_selected_mice_and_preserves_their_cage(self):
+        second = Mouse(mouse_code="M02", cage=self.source_cage, status="在笼")
+        unselected = Mouse(mouse_code="M03", cage=self.source_cage, status="在笼")
+        self.db.add_all([second, unselected])
+        self.db.commit()
+
+        result = batch_set_owner(MouseBatchSetOwner(
+            mouse_codes=[self.mouse.mouse_code, second.mouse_code],
+            owner_name="领取人甲", claim_date="2026-10-08", claim_purpose="成像实验",
+        ), self.db, self.admin)
+
+        for mouse in [self.mouse, second]:
+            self.db.refresh(mouse)
+            self.assertEqual(mouse.owner_name, "领取人甲")
+            self.assertEqual(mouse.owner.name, "领取人甲")
+            self.assertEqual(mouse.cage_id, self.source_cage.id)
+            self.assertEqual(mouse.status, "已领用")
+            self.assertEqual(mouse.claim_date, "2026-10-08")
+            self.assertEqual(mouse.claim_purpose, "成像实验")
+        self.db.refresh(unselected)
+        self.assertIsNone(unselected.owner_id)
+        self.assertFalse(unselected.owner_name)
+        self.assertEqual(unselected.status, "在笼")
+        self.assertEqual(unselected.cage_id, self.source_cage.id)
+        self.assertEqual(result["affected_count"], 2)
+        self.assertCountEqual(result["affected_codes"], ["M01", "M02"])
+        log = self.db.query(TransferLog).one()
+        self.assertEqual(log.mouse_count, 2)
+        self.assertEqual(log.claimer_name, "领取人甲")
+
     def test_target_cage_moves_mouse_to_managed_cage(self):
         batch_set_owner(MouseBatchSetOwner(
             mouse_ids=[self.mouse.id], owner_name="领取人甲",

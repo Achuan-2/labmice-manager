@@ -3,8 +3,11 @@
     v-model="visible"
     title="指定小鼠领取人 / 领用登记"
     width="560px"
+    append-to-body
     destroy-on-close
     :close-on-click-modal="false"
+    :close-on-press-escape="!loading"
+    :show-close="!loading"
   >
     <div class="mb-4 text-sm text-gray-600">
       当前已选择 <span class="font-bold text-blue-600">{{ targetMice.length }}</span> 只小鼠：
@@ -15,14 +18,34 @@
           size="small"
           effect="plain"
           type="info"
+          :closable="!loading"
+          @close="removeTargetMouse(m)"
         >
           {{ m.mouse_code }}
           <span v-if="m.strain" class="text-xs text-gray-400 ml-1">({{ m.strain }})</span>
         </el-tag>
+        <span v-if="!targetMice.length" class="text-gray-400">尚未选择小鼠，请从下方添加</span>
       </div>
+      <el-select
+        v-model="mouseToAdd"
+        class="mt-2"
+        filterable
+        remote
+        :remote-method="searchMice"
+        :loading="searchingMice"
+        :disabled="loading"
+        placeholder="搜索编号或品系，添加已有小鼠"
+        no-data-text="没有可添加的小鼠"
+        style="width: 100%"
+        @visible-change="open => { if (open) searchMice('') }"
+        @change="addTargetMouse"
+      >
+        <el-option v-for="mouse in availableMice" :key="mouse.mouse_code" :label="mouseOptionLabel(mouse)" :value="mouse.mouse_code" />
+      </el-select>
+      <div class="mt-1 text-xs text-gray-400">点击标签 × 可移除本次选择；搜索结果最多显示 50 只，可输入完整编号查找。</div>
     </div>
 
-    <el-form :model="form" :rules="rules" ref="formRef" label-width="125px" size="default">
+    <el-form :model="form" :rules="rules" ref="formRef" label-width="125px" size="default" :disabled="loading">
       <el-form-item label="领取人" prop="owner_name" required>
         <el-select
           v-model="form.owner_name"
@@ -105,8 +128,8 @@
 
     <template #footer>
       <div class="flex justify-end gap-2">
-        <el-button @click="visible = false">取消</el-button>
-        <el-button type="primary" :loading="loading" @click="handleSubmit">
+        <el-button :disabled="loading" @click="visible = false">取消</el-button>
+        <el-button type="primary" :loading="loading" :disabled="!targetMice.length" @click="handleSubmit">
           确认指定 ({{ targetMice.length }} 只)
         </el-button>
       </div>
@@ -133,6 +156,22 @@ const visible = ref(false)
 const loading = ref(false)
 const formRef = ref(null)
 const targetMice = ref([])
+const mouseToAdd = ref(null)
+const mouseSearch = ref('')
+const mouseSearchResults = ref([])
+const addedMice = ref([])
+const searchingMice = ref(false)
+let mouseSearchRequestId = 0
+const availableMice = computed(() => {
+  const selectedCodes = new Set(targetMice.value.map(mouse => mouse.mouse_code))
+  const keyword = mouseSearch.value.toLowerCase()
+  // Keep the original mice available for re-adding even when they are outside the search page.
+  const originals = [...props.mice, ...addedMice.value].filter(mouse =>
+    !keyword || [mouse.mouse_code, mouse.strain].some(value => String(value || '').toLowerCase().includes(keyword))
+  )
+  return [...new Map([...originals, ...mouseSearchResults.value].map(mouse => [mouse.mouse_code, mouse])).values()]
+    .filter(mouse => mouse.mouse_code && !selectedCodes.has(mouse.mouse_code))
+})
 const claimerOptions = ref([])
 const roomOptions = ref([])
 const transferRoomOptions = ref([])
@@ -158,6 +197,12 @@ watch(() => props.modelValue, async (val) => {
   visible.value = val
   if (val) {
     targetMice.value = [...props.mice]
+    mouseToAdd.value = null
+    mouseSearch.value = ''
+    mouseSearchResults.value = []
+    addedMice.value = []
+    mouseSearchRequestId++
+    searchingMice.value = false
     Object.assign(form, {
       owner_name: '',
       claim_date: new Date().toISOString().split('T')[0],
@@ -171,6 +216,10 @@ watch(() => props.modelValue, async (val) => {
 })
 
 watch(visible, (val) => {
+  if (!val) {
+    mouseSearchRequestId++
+    searchingMice.value = false
+  }
   emit('update:modelValue', val)
 })
 
@@ -187,6 +236,47 @@ watch(() => form.owner_name, (ownerName) => {
 watch(() => form.target_room, () => {
   form.target_cage_code = ''
 })
+
+function mouseOptionLabel(mouse) {
+  return [
+    mouse.mouse_code,
+    mouse.strain,
+    mouse.cage_room || mouse.source_room,
+    mouse.cage_code,
+    mouse.owner_name ? `领取人：${mouse.owner_name}` : '未分配'
+  ].filter(Boolean).join(' · ')
+}
+
+function removeTargetMouse(mouse) {
+  if (loading.value) return
+  targetMice.value = targetMice.value.filter(item => item.mouse_code !== mouse.mouse_code)
+}
+
+function addTargetMouse(code) {
+  if (loading.value) return
+  const mouse = availableMice.value.find(item => item.mouse_code === code)
+  if (mouse) {
+    targetMice.value.push(mouse)
+    if (!addedMice.value.some(item => item.mouse_code === code)) addedMice.value.push(mouse)
+  }
+  mouseToAdd.value = null
+}
+
+async function searchMice(query) {
+  if (!visible.value) return
+  const requestId = ++mouseSearchRequestId
+  mouseSearch.value = query.trim()
+  mouseSearchResults.value = []
+  searchingMice.value = true
+  try {
+    const result = await miceApi.listMice({ page: 1, page_size: 50, keyword: mouseSearch.value || undefined })
+    if (requestId === mouseSearchRequestId) mouseSearchResults.value = result.items
+  } catch (e) {
+    if (requestId === mouseSearchRequestId) ElMessage.error(e.response?.data?.detail || '搜索小鼠失败')
+  } finally {
+    if (requestId === mouseSearchRequestId) searchingMice.value = false
+  }
+}
 
 async function loadOptions() {
   try {
@@ -207,9 +297,12 @@ async function loadOptions() {
 }
 
 async function handleSubmit() {
+  if (loading.value) return
+  if (!targetMice.value.length) return ElMessage.warning('请至少选择一只小鼠')
   if (!formRef.value) return
   await formRef.value.validate(async (valid) => {
-    if (!valid) return
+    if (!valid || loading.value) return
+    if (!targetMice.value.length) return ElMessage.warning('请至少选择一只小鼠')
     loading.value = true
     try {
       const mouseCodes = targetMice.value.map(m => m.mouse_code)
