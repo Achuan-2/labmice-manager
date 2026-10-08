@@ -37,12 +37,14 @@
         placeholder="搜索编号或品系，添加已有小鼠"
         no-data-text="没有可添加的小鼠"
         style="width: 100%"
-        @visible-change="open => { if (open) searchMice('') }"
         @change="addTargetMouse"
       >
         <el-option v-for="mouse in availableMice" :key="mouse.mouse_code" :label="mouseOptionLabel(mouse)" :value="mouse.mouse_code" />
+        <template #empty>
+          <div class="py-3 px-4 text-center text-sm text-gray-400">{{ searchingMice ? '正在搜索小鼠…' : '没有可添加的小鼠，请尝试其他编号或品系' }}</div>
+        </template>
       </el-select>
-      <div class="mt-1 text-xs text-gray-400">点击标签 × 可移除本次选择；搜索结果最多显示 50 只，可输入完整编号查找。</div>
+      <div class="mt-1 text-xs text-gray-400">默认显示未设置领取人的小鼠，输入编号或品系也可搜索已设置领取人的小鼠。点击标签 × 可移除本次选择；搜索结果最多显示 50 只。</div>
     </div>
 
     <el-form :model="form" :rules="rules" ref="formRef" label-width="125px" size="default" :disabled="loading">
@@ -170,7 +172,10 @@ const availableMice = computed(() => {
     !keyword || [mouse.mouse_code, mouse.strain].some(value => String(value || '').toLowerCase().includes(keyword))
   )
   return [...new Map([...originals, ...mouseSearchResults.value].map(mouse => [mouse.mouse_code, mouse])).values()]
-    .filter(mouse => mouse.mouse_code && !selectedCodes.has(mouse.mouse_code))
+    .filter(mouse => {
+      if (!mouse.mouse_code || selectedCodes.has(mouse.mouse_code)) return false
+      return Boolean(keyword) || (!mouse.owner_id && !mouse.owner_name?.trim())
+    })
 })
 const claimerOptions = ref([])
 const roomOptions = ref([])
@@ -269,7 +274,12 @@ async function searchMice(query) {
   mouseSearchResults.value = []
   searchingMice.value = true
   try {
-    const result = await miceApi.listMice({ page: 1, page_size: 50, keyword: mouseSearch.value || undefined })
+    const result = await miceApi.listMice({
+      page: 1,
+      page_size: 50,
+      has_owner: mouseSearch.value ? undefined : false,
+      keyword: mouseSearch.value || undefined
+    })
     if (requestId === mouseSearchRequestId) mouseSearchResults.value = result.items
   } catch (e) {
     if (requestId === mouseSearchRequestId) ElMessage.error(e.response?.data?.detail || '搜索小鼠失败')
