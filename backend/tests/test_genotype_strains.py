@@ -47,6 +47,36 @@ class GenotypeStrainTests(unittest.TestCase):
             self.assertEqual(self.db.query(Mouse).filter_by(mouse_code=code).one().strain, strain)
             self.assertEqual(self.db.query(GenotypeRecord).filter_by(mouse_code=code).one().strain, strain)
 
+    def test_reimport_fills_existing_genotype_strain_without_duplicate_or_overwrite(self):
+        mouse = Mouse(mouse_code="B829", strain="", genotype_1="WT")
+        record = GenotypeRecord(mouse=mouse, mouse_code="B829", strain="", test_date="2023-02-07", genotype_1="WT")
+        explicit = GenotypeRecord(mouse_code="B830", strain="已有品系", test_date="2023-02-07", genotype_1="HET")
+        self.db.add_all([record, explicit])
+        self.db.commit()
+        self.import_rows(
+            ["2023-02-07", "B829", "JAX-5XFAD-J", "2023-01-10", "M", None, "WT", None, None],
+            ["2023-02-07", "B830", "JAX-5XFAD-J", "2023-01-10", "M", None, "HET", None, None],
+        )
+        self.assertEqual((mouse.strain, record.strain), ("JAX-5XFAD-J", "JAX-5XFAD-J"))
+        self.assertEqual(record.genotype_1, "WT")
+        self.assertEqual(explicit.strain, "已有品系")
+        self.assertEqual(self.db.query(GenotypeRecord).count(), 2)
+
+    def test_import_reads_vertical_strain_merges_across_different_dates(self):
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = "小鼠基因型鉴定结果"
+        sheet.append(["日期", "编号", "品系", "生日", "Genotype 1"])
+        sheet.append(["2023-02-07", "B829", "JAX-5XFAD-J", "2023-01-10", "WT"])
+        sheet.append(["2023-02-08", "B830", None, None, "HET"])
+        sheet.merge_cells("C2:C3")
+        sheet.merge_cells("D2:D3")
+        with patch("backend.app.services.importer.openpyxl.load_workbook", return_value=workbook):
+            result = import_single_excel_file(self.db, "test.xlsx")
+        self.assertEqual(result["errors"], [])
+        record = self.db.query(GenotypeRecord).filter_by(mouse_code="B830").one()
+        self.assertEqual((record.strain, record.dob, record.test_date), ("JAX-5XFAD-J", "2023-01-10", "2023-02-08"))
+
     def test_same_date_inherits_merged_strain_but_new_date_resets_it(self):
         self.import_rows(
             ["2026-08-18", "F335", "Camk2/Ai93-Ras-N", "2026-07-05", "F", None, "WT", None, None],
@@ -230,8 +260,8 @@ class GenotypeStrainTests(unittest.TestCase):
             for number, genotype in zip(range(915, 924), ["纯合子", "野生型", "纯合子", "杂合子", "杂合子", "纯合子", "杂合子", "野生型", "纯合子"])
         )
         unrelated_codes = [
-            "E018", "E028", "E0190", "E19", "E086", "E093", "E0870", "E87", "C795", "C790", "C791",
-            "C967", "C973", "C9680", "E968", "C796", "C792", "C793",
+            "E018", "E028", "E0190", "E19", "E086", "E093", "E0870", "E87", "C7950", "C7900", "C7910",
+            "C967", "C973", "C9680", "E968", "C7960", "C7920", "C7930",
             "C914", "C924", "C9150", "E915",
         ]
         for code, genotype, parents in definitions:
@@ -291,7 +321,7 @@ class GenotypeStrainTests(unittest.TestCase):
             ))
         unrelated_codes = [
             "C989", "C998", "C9900", "C627", "C625", "E990",
-            "C813", "C824", "C8140", "E814", "C476",
+            "C8130", "C824", "C8140", "E814", "C476",
             "C711", "C716", "C7120", "E712",
             "C675", "C6690", "E669",
             "B777", "B789", "B7780", "E778",
@@ -323,7 +353,7 @@ class GenotypeStrainTests(unittest.TestCase):
             self.db.add(GenotypeRecord(
                 mouse=mouse, mouse_code=code, strain="", parents=mouse.parents, genotype_1="阳性",
             ))
-        unrelated_codes = ["C6640", "E664", "C288", "C283", "C478", "C480", "C4790", "E479", "C564", "C567", "C5650", "E565"]
+        unrelated_codes = ["C6640", "E664", "C2880", "C2830", "C478", "C480", "C4790", "E479", "C564", "C567", "C5650", "E565"]
         for code in unrelated_codes:
             self.db.add(Mouse(mouse_code=code, strain=""))
         explicit = GenotypeRecord(mouse_code="C664", strain="TH-cre/Ai148", genotype_1="阳性")
@@ -382,12 +412,12 @@ class GenotypeStrainTests(unittest.TestCase):
         self.db.commit()
 
         result = sync_and_normalize_all_strains(self.db)
-        self.assertEqual(result["repaired_count"], 11)
-        for code in ["C663", "C664", "C786", "E458", "F066"]:
+        self.assertEqual(result["repaired_count"], 13)
+        for code in ["C288", "C663", "C664", "C786", "E458", "F066"]:
             self.assertEqual(self.db.query(Mouse).filter_by(mouse_code=code).one().strain, "TH-cre")
             record = self.db.query(GenotypeRecord).filter_by(mouse_code=code).one()
             self.assertEqual((record.strain, record.genotype_1), ("TH-cre", "阴性"))
-        for code in ["C288", "OTHER1", "OTHER2", "CROSS2"]:
+        for code in ["OTHER1", "OTHER2", "CROSS2"]:
             self.assertEqual(self.db.query(Mouse).filter_by(mouse_code=code).one().strain, "")
         self.assertEqual(self.db.query(Mouse).filter_by(mouse_code="CROSS1").one().strain, "TH-cre/Ai148")
         self.assertEqual(self.db.query(GenotypeRecord).filter_by(mouse_code="ARCHIVE1").one().strain, "TH-cre")

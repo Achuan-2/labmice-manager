@@ -83,6 +83,19 @@ def parse_date(val: Any) -> Optional[str]:
             return None
     return s
 
+def merged_column_values(sheet, column_index: Optional[int]) -> Dict[int, Any]:
+    """Resolve vertical merges in one identified column (zero-based index)."""
+    if column_index is None:
+        return {}
+    values = {}
+    column = column_index + 1
+    for area in sheet.merged_cells.ranges:
+        if area.min_col == area.max_col == column:
+            value = sheet.cell(area.min_row, column).value
+            values.update((row, value) for row in range(area.min_row, area.max_row + 1))
+    return values
+
+
 def extract_mating_date(*values: Any) -> Optional[str]:
     """Extract compact or separated mating dates from observation/notes text."""
     pattern = re.compile(r"合笼(?:日期|时间)?\s*[：:]\s*(\d{6,8}|\d{2,4}[年./-]\d{1,2}[月./-]\d{1,2}日?)")
@@ -495,8 +508,10 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
             current_date = None
             current_strain = ""
             current_dob = None
+            merged_strains = merged_column_values(ws_gt, strain_col)
+            merged_dobs = merged_column_values(ws_gt, dob_col)
 
-            for row in ws_gt.iter_rows(min_row=2, values_only=True):
+            for row_number, row in enumerate(ws_gt.iter_rows(min_row=2, values_only=True), 2):
                 try:
                     # Update date if present in date_col
                     raw_date = row[date_col] if date_col is not None and len(row) > date_col else None
@@ -508,12 +523,14 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
 
                     # Update strain if present in strain_col
                     raw_strain = row[strain_col] if strain_col is not None and len(row) > strain_col else None
+                    raw_strain = merged_strains.get(row_number, raw_strain)
                     # This is the explicitly identified strain column, not an ear-tag column.
                     if raw_strain and str(raw_strain).strip():
                         current_strain = normalize_strain_name(db, raw_strain)
 
                     # Update DOB if present in dob_col
                     raw_dob = row[dob_col] if dob_col is not None and len(row) > dob_col else None
+                    raw_dob = merged_dobs.get(row_number, raw_dob)
                     parsed_dob = parse_date(raw_dob)
                     if parsed_dob:
                         current_dob = parsed_dob
@@ -581,6 +598,8 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
                         GenotypeRecord.genotype_1 == g1,
                         GenotypeRecord.genotype_2 == g2
                     ).first()
+                    if existing_gt and not (existing_gt.strain or "").strip() and strain:
+                        existing_gt.strain = strain
                     if not existing_gt:
                         gt_record = GenotypeRecord(
                             mouse_code=m_code,
