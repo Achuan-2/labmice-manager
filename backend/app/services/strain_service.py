@@ -6,16 +6,33 @@ from sqlalchemy import func
 from backend.app.models.models import Strain, Mouse, Cage, GenotypeRecord
 
 TRIPLE_TRANSGENIC_STRAIN = "Camk2/Ai93-Ras-N"
+TRIPLE_TRANSGENIC_RAS_STRAIN = "Camk2/Ai93-Ras"
 KNOWN_FOUNDER_STRAINS = {"C663": "TH-cre"}
 KNOWN_MOUSE_STRAINS = {
     "E798": TRIPLE_TRANSGENIC_STRAIN,
-    **{code: "RAS-N" for code in ("E987", "E988", "E989", "E990", "E991", "E992")},
+    **{code: "TH-cre" for code in ("C479", "C565", "C566", "C664", "C665", "C666", "C667", "C668")},
+    **{code: "Ras" for code in (
+        "B778", "B779", "B780", "B781", "B782", "B783", "B784", "B785", "B786", "B787", "B788",
+        "C669", "C670", "C671", "C672", "C673", "C674",
+        "C712", "C713", "C714", "C715",
+        "C814", "C815", "C816", "C817", "C818", "C819", "C820", "C821", "C822", "C823",
+        "C990", "C991", "C992", "C993", "C994", "C995", "C996", "C997",
+    )},
+    **{code: "RAS-N" for code in (
+        "C915", "C916", "C917", "C918", "C919", "C920", "C921", "C922", "C923",
+        "C968", "C969", "C970", "C971", "C972",
+        "E019", "E020", "E021", "E022", "E023", "E024", "E025", "E026", "E027",
+        "E087", "E088", "E089", "E090", "E091", "E092",
+        "E987", "E988", "E989", "E990", "E991", "E992",
+    )},
 }
 
 # Canonical laboratory nomenclature mappings for case merging
 CANONICAL_STRAIN_MAP = {
     "camk2/ai93-ras-n": TRIPLE_TRANSGENIC_STRAIN,
+    "camk2/ai93-ras": TRIPLE_TRANSGENIC_RAS_STRAIN,
     "th-cre": "TH-cre",
+    "ras": "Ras",
     "ras-n": "RAS-N",
     "5fad": "5xFAD",
     "5xfad": "5xFAD",
@@ -48,15 +65,20 @@ CANONICAL_STRAIN_MAP = {
 
 def infer_strain_from_genotypes(*genotypes: Optional[str]) -> str:
     """Recover the triple-transgenic family from all three named markers in any order."""
-    markers = (r"camk2a(?:-tta)?", r"ai93", r"ras-?n")
-    if len(genotypes) != len(markers):
+    # Camk2 is a historical label for Camk2a; Ras and Ras-N are distinct families.
+    if len(genotypes) != 3:
         return ""
     values = [str(value or "").strip() for value in genotypes]
-    if all(
-        any(re.match(rf"^{marker}(?:[-_：:\s]|$)", value, re.IGNORECASE) for value in values)
-        for marker in markers
-    ):
+
+    def has_marker(marker: str) -> bool:
+        return any(re.match(rf"^{marker}(?:[-_：:\s]|$)", value, re.IGNORECASE) for value in values)
+
+    if not all(has_marker(marker) for marker in (r"camk2a?(?:-tta)?", r"ai93")):
+        return ""
+    if has_marker(r"ras-?n"):
         return TRIPLE_TRANSGENIC_STRAIN
+    if has_marker(r"ras"):
+        return TRIPLE_TRANSGENIC_RAS_STRAIN
     return ""
 
 

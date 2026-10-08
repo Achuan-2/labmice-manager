@@ -119,6 +119,42 @@ class GenotypeStrainTests(unittest.TestCase):
                          ("Ai93-杂合子", "Camk2a-阴性", "RasN-野生型"))
         self.assertEqual(sync_and_normalize_all_strains(self.db)["repaired_count"], 0)
 
+    def test_legacy_marker_names_distinguish_ras_from_ras_n(self):
+        for camk2 in ["Camk2", "Camk2a"]:
+            for ras in ["Ras", "RasN", "Ras-N"]:
+                for genotypes in permutations(("Ai93-杂合子", f"{camk2}-阴性", f"{ras}-杂合子")):
+                    with self.subTest(genotypes=genotypes):
+                        expected = "Camk2/Ai93-Ras" if ras == "Ras" else "Camk2/Ai93-Ras-N"
+                        self.assertEqual(infer_strain_from_genotypes(*genotypes), expected)
+        for genotypes in [
+            ("Ai93-杂合子", None, "Ras-杂合子"),
+            ("Ai148-杂合子", "Camk2-阳性", "Ras-杂合子"),
+            ("Ai93-杂合子", "Camk20-阳性", "Ras-杂合子"),
+            ("Ai93-杂合子", "Camk2-阳性", "Rasgrf2-杂合子"),
+            ("Ai93-杂合子", "Camk2-阳性", "RasN2-杂合子"),
+        ]:
+            with self.subTest(genotypes=genotypes):
+                self.assertEqual(infer_strain_from_genotypes(*genotypes), "")
+
+    def test_e163_e169_legacy_ras_records_are_imported_and_backfilled(self):
+        self.import_rows(*[
+            ["2026-01-01", f"E{number}", None, None, "F", "C752M+C940F", "Ai93-杂合子", "Camk2a-阳性", "Ras-杂合子"]
+            for number in range(163, 170)
+        ])
+        for model in [Mouse, GenotypeRecord]:
+            for row in self.db.query(model).all():
+                self.assertEqual(row.strain, "Camk2/Ai93-Ras")
+                row.strain = ""
+        self.db.commit()
+        self.assertEqual(sync_and_normalize_all_strains(self.db)["repaired_count"], 14)
+        for model in [Mouse, GenotypeRecord]:
+            for row in self.db.query(model).all():
+                self.assertEqual(row.strain, "Camk2/Ai93-Ras")
+                self.assertEqual((row.genotype_1, row.genotype_2), ("Ai93-杂合子", "Camk2a-阳性"))
+                if isinstance(row, GenotypeRecord):
+                    self.assertEqual(row.genotype_3, "Ras-杂合子")
+        self.assertEqual(sync_and_normalize_all_strains(self.db)["repaired_count"], 0)
+
     def test_backfill_preserves_explicit_strains_and_handles_unlinked_record(self):
         mouse = Mouse(mouse_code="F335", strain="自定义品系")
         record = GenotypeRecord(
@@ -180,6 +216,133 @@ class GenotypeStrainTests(unittest.TestCase):
         self.assertIsNotNone(self.db.query(Strain).filter_by(name="RAS-N").first())
         self.assertEqual(backfill_known_pedigree_strains(self.db), 0)
 
+    def test_confirmed_ras_n_batches_preserve_results_and_leading_zero_codes(self):
+        definitions = [
+            (f"E{number:03d}", genotype, "C795M+C790F、C791F")
+            for number, genotype in [
+                *zip(range(19, 28), ["野生型", "杂合子", "杂合子", "野生型", "野生型", "杂合子", "杂合子", "纯合子", "纯合子"]),
+                *zip(range(87, 93), ["野生型", "野生型", "杂合子", "野生型", "杂合子", "纯合子"]),
+            ]
+        ]
+        definitions.extend((f"C{number}", "纯合子", "C796M+C792F、C793F") for number in range(968, 973))
+        definitions.extend(
+            (f"C{number}", genotype, "C795M+C790F、C791F")
+            for number, genotype in zip(range(915, 924), ["纯合子", "野生型", "纯合子", "杂合子", "杂合子", "纯合子", "杂合子", "野生型", "纯合子"])
+        )
+        unrelated_codes = [
+            "E018", "E028", "E0190", "E19", "E086", "E093", "E0870", "E87", "C795", "C790", "C791",
+            "C967", "C973", "C9680", "E968", "C796", "C792", "C793",
+            "C914", "C924", "C9150", "E915",
+        ]
+        for code, genotype, parents in definitions:
+            mouse = Mouse(mouse_code=code, strain="", parents=parents, genotype_1=genotype)
+            self.db.add(GenotypeRecord(
+                mouse=mouse, mouse_code=code, strain="", parents=mouse.parents, genotype_1=genotype,
+            ))
+        for code in unrelated_codes:
+            self.db.add(Mouse(mouse_code=code, strain=""))
+        explicit = GenotypeRecord(mouse_code="E087", strain="已有品系", genotype_1="野生型")
+        self.db.add(explicit)
+        self.db.commit()
+
+        self.assertEqual(backfill_known_pedigree_strains(self.db), 58)
+        for code, genotype, parents in definitions:
+            mouse = self.db.query(Mouse).filter_by(mouse_code=code).one()
+            record = self.db.query(GenotypeRecord).filter_by(mouse_code=code, strain="RAS-N").one()
+            for row in [mouse, record]:
+                self.assertEqual((row.strain, row.genotype_1, row.parents), ("RAS-N", genotype, parents))
+        for code in unrelated_codes:
+            self.assertEqual(self.db.query(Mouse).filter_by(mouse_code=code).one().strain, "")
+        self.assertEqual(explicit.strain, "已有品系")
+        self.assertIsNotNone(self.db.query(Strain).filter_by(name="RAS-N").first())
+        self.assertEqual(backfill_known_pedigree_strains(self.db), 0)
+
+    def test_ras_import_remains_distinct_from_ras_n(self):
+        self.import_rows(
+            ["2026-01-01", "C990", "RAS", None, "M", "C627M+C625F", "纯合子", None, None],
+            ["2026-01-02", "E987", "ras-n", None, "M", None, "纯合子", None, None],
+        )
+        for model in [Mouse, GenotypeRecord]:
+            self.assertEqual(self.db.query(model).filter_by(mouse_code="C990").one().strain, "Ras")
+            self.assertEqual(self.db.query(model).filter_by(mouse_code="E987").one().strain, "RAS-N")
+
+    def test_confirmed_ras_batches_preserve_results_and_exact_codes(self):
+        definitions = [
+            (f"C{number}", "C627M+C625F", "纯合子")
+            for number in [*range(814, 821), *range(990, 998)]
+        ]
+        definitions.extend((f"C{number}", "C476M+B780F、B781F", "纯合子") for number in range(821, 824))
+        definitions.extend(
+            (f"C{number}", "C476M+B780F、B781F", genotype)
+            for number, genotype in zip(range(712, 716), ["纯合子", "纯合子", "杂合子", "杂合子"])
+        )
+        definitions.extend(
+            (f"C{number}", "C476M+B780F、B781F", genotype)
+            for number, genotype in zip(range(669, 675), ["杂合子", "杂合子", "纯合子", "纯合子", "杂合子", "杂合子"])
+        )
+        definitions.extend(
+            (f"B{number}", "不明" if number in [778, 779, 782] else "B782M+B778F、B779F", genotype)
+            for number, genotype in zip(range(778, 789), ["杂合子", "杂合子", "杂合子", "杂合子", "杂合子", "杂合子", "纯合子", "纯合子", "杂合子", "纯合子", "杂合子"])
+        )
+        for code, parents, genotype in definitions:
+            mouse = Mouse(mouse_code=code, strain="", parents=parents, genotype_1=genotype)
+            self.db.add(GenotypeRecord(
+                mouse=mouse, mouse_code=code, strain="", parents=mouse.parents, genotype_1=genotype,
+            ))
+        unrelated_codes = [
+            "C989", "C998", "C9900", "C627", "C625", "E990",
+            "C813", "C824", "C8140", "E814", "C476",
+            "C711", "C716", "C7120", "E712",
+            "C675", "C6690", "E669",
+            "B777", "B789", "B7780", "E778",
+        ]
+        for code in unrelated_codes:
+            self.db.add(Mouse(mouse_code=code, strain="已有品系" if code == "E990" else ""))
+        explicit = GenotypeRecord(mouse_code="C990", strain="已有品系", genotype_1="纯合子")
+        self.db.add(explicit)
+        self.db.commit()
+
+        self.assertEqual(backfill_known_pedigree_strains(self.db), 78)
+        for code, parents, genotype in definitions:
+            mouse = self.db.query(Mouse).filter_by(mouse_code=code).one()
+            record = self.db.query(GenotypeRecord).filter_by(mouse_code=code, strain="Ras").one()
+            for row in [mouse, record]:
+                self.assertEqual((row.strain, row.genotype_1, row.parents), ("Ras", genotype, parents))
+        for code in unrelated_codes:
+            self.assertEqual(self.db.query(Mouse).filter_by(mouse_code=code).one().strain, "已有品系" if code == "E990" else "")
+        self.assertEqual(explicit.strain, "已有品系")
+        self.assertIsNotNone(self.db.query(Strain).filter_by(name="Ras").first())
+        self.assertEqual(backfill_known_pedigree_strains(self.db), 0)
+
+    def test_confirmed_th_cre_batches_preserve_results_and_exact_codes(self):
+        numbers = [479, 565, 566, *range(664, 669)]
+        for number in numbers:
+            code = f"C{number}"
+            parents = "C288M+C283F" if number == 479 else "C288M+C283F、C479F"
+            mouse = Mouse(mouse_code=code, strain="", parents=parents, genotype_1="阳性")
+            self.db.add(GenotypeRecord(
+                mouse=mouse, mouse_code=code, strain="", parents=mouse.parents, genotype_1="阳性",
+            ))
+        unrelated_codes = ["C6640", "E664", "C288", "C283", "C478", "C480", "C4790", "E479", "C564", "C567", "C5650", "E565"]
+        for code in unrelated_codes:
+            self.db.add(Mouse(mouse_code=code, strain=""))
+        explicit = GenotypeRecord(mouse_code="C664", strain="TH-cre/Ai148", genotype_1="阳性")
+        self.db.add(explicit)
+        self.db.commit()
+
+        self.assertEqual(backfill_known_pedigree_strains(self.db), 16)
+        for number in numbers:
+            code = f"C{number}"
+            parents = "C288M+C283F" if number == 479 else "C288M+C283F、C479F"
+            mouse = self.db.query(Mouse).filter_by(mouse_code=code).one()
+            record = self.db.query(GenotypeRecord).filter_by(mouse_code=code, strain="TH-cre").one()
+            for row in [mouse, record]:
+                self.assertEqual((row.strain, row.genotype_1, row.parents), ("TH-cre", "阳性", parents))
+        for code in unrelated_codes:
+            self.assertEqual(self.db.query(Mouse).filter_by(mouse_code=code).one().strain, "")
+        self.assertEqual(explicit.strain, "TH-cre/Ai148")
+        self.assertEqual(backfill_known_pedigree_strains(self.db), 0)
+
     def test_confirmed_e798_strain_preserves_genotypes_and_matches_exact_code(self):
         mouse = Mouse(mouse_code="E798", strain="", genotype_2="Ai148-杂合子")
         record = GenotypeRecord(
@@ -219,12 +382,12 @@ class GenotypeStrainTests(unittest.TestCase):
         self.db.commit()
 
         result = sync_and_normalize_all_strains(self.db)
-        self.assertEqual(result["repaired_count"], 9)
-        for code in ["C663", "C786", "E458", "F066"]:
+        self.assertEqual(result["repaired_count"], 11)
+        for code in ["C663", "C664", "C786", "E458", "F066"]:
             self.assertEqual(self.db.query(Mouse).filter_by(mouse_code=code).one().strain, "TH-cre")
             record = self.db.query(GenotypeRecord).filter_by(mouse_code=code).one()
             self.assertEqual((record.strain, record.genotype_1), ("TH-cre", "阴性"))
-        for code in ["C288", "C664", "OTHER1", "OTHER2", "CROSS2"]:
+        for code in ["C288", "OTHER1", "OTHER2", "CROSS2"]:
             self.assertEqual(self.db.query(Mouse).filter_by(mouse_code=code).one().strain, "")
         self.assertEqual(self.db.query(Mouse).filter_by(mouse_code="CROSS1").one().strain, "TH-cre/Ai148")
         self.assertEqual(self.db.query(GenotypeRecord).filter_by(mouse_code="ARCHIVE1").one().strain, "TH-cre")
