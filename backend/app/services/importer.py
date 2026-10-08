@@ -7,7 +7,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from backend.app.models.models import Mouse, Cage, Claimer, TransferLog, Primer, GenotypeRecord, TransferRequest
-from backend.app.services.strain_service import normalize_strain_name
+from backend.app.services.strain_service import backfill_known_pedigree_strains, infer_strain_from_genotypes, normalize_strain_name
 from backend.app.services.owner_service import sync_euthanasia_owner
 
 INFERRED_PARENT_PLACEHOLDER_NOTE = "由基因鉴定父母关系推测录入"
@@ -501,14 +501,15 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
                     # Update date if present in date_col
                     raw_date = row[date_col] if date_col is not None and len(row) > date_col else None
                     parsed_d = parse_date(raw_date)
-                    if parsed_d:
+                    if parsed_d and parsed_d != current_date:
                         current_date = parsed_d
                         current_strain = ""
                         current_dob = None
 
                     # Update strain if present in strain_col
                     raw_strain = row[strain_col] if strain_col is not None and len(row) > strain_col else None
-                    if raw_strain and str(raw_strain).strip() and not is_valid_mouse_code(str(raw_strain).strip()):
+                    # This is the explicitly identified strain column, not an ear-tag column.
+                    if raw_strain and str(raw_strain).strip():
                         current_strain = normalize_strain_name(db, raw_strain)
 
                     # Update DOB if present in dob_col
@@ -542,6 +543,9 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
                     if g2 in ["", "/", "-", "无", "None", "nan"]: g2 = None
                     g3 = str(row[g3_col]).strip() if g3_col is not None and len(row) > g3_col and row[g3_col] is not None else None
                     if g3 in ["", "/", "-", "无", "None", "nan"]: g3 = None
+
+                    if not strain:
+                        strain = normalize_strain_name(db, infer_strain_from_genotypes(g1, g2, g3))
 
                     op_rec = str(row[op_col]).strip() if op_col is not None and len(row) > op_col and row[op_col] is not None else None
                     notes = str(row[notes_col]).strip() if notes_col is not None and len(row) > notes_col and row[notes_col] is not None else None
@@ -970,6 +974,7 @@ def import_single_excel_file(db: Session, file_path: str, original_filename: str
     cleanup_synthetic_room_imports(db)
     cleanup_invalid_genotype_mice(db)
     results["out_of_cage_updated"] = normalize_cage_statuses(db)
+    results["strains_repaired"] = backfill_known_pedigree_strains(db)
 
     db.commit()
     return results
@@ -1015,6 +1020,7 @@ def import_local_excel_folder(db: Session, folder_path: str) -> Dict[str, Any]:
     cleanup_synthetic_room_imports(db)
     cleanup_invalid_genotype_mice(db)
     results["out_of_cage_updated"] = normalize_cage_statuses(db)
+    results["strains_repaired"] = backfill_known_pedigree_strains(db)
 
     db.commit()
     return results
