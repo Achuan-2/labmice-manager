@@ -7,11 +7,16 @@ from backend.app.models.models import Strain, Mouse, Cage, GenotypeRecord
 
 TRIPLE_TRANSGENIC_STRAIN = "Camk2/Ai93-Ras-N"
 KNOWN_FOUNDER_STRAINS = {"C663": "TH-cre"}
+KNOWN_MOUSE_STRAINS = {
+    "E798": TRIPLE_TRANSGENIC_STRAIN,
+    **{code: "RAS-N" for code in ("E987", "E988", "E989", "E990", "E991", "E992")},
+}
 
 # Canonical laboratory nomenclature mappings for case merging
 CANONICAL_STRAIN_MAP = {
     "camk2/ai93-ras-n": TRIPLE_TRANSGENIC_STRAIN,
     "th-cre": "TH-cre",
+    "ras-n": "RAS-N",
     "5fad": "5xFAD",
     "5xfad": "5xFAD",
     "ras-n/ai93": "Ras-N/Ai93",
@@ -42,13 +47,14 @@ CANONICAL_STRAIN_MAP = {
 }
 
 def infer_strain_from_genotypes(*genotypes: Optional[str]) -> str:
-    """Recover the triple-transgenic family only from its three named markers."""
+    """Recover the triple-transgenic family from all three named markers in any order."""
     markers = (r"camk2a(?:-tta)?", r"ai93", r"ras-?n")
     if len(genotypes) != len(markers):
         return ""
+    values = [str(value or "").strip() for value in genotypes]
     if all(
-        re.match(rf"^{marker}(?:[-_：:\s]|$)", str(value or "").strip(), re.IGNORECASE)
-        for marker, value in zip(markers, genotypes)
+        any(re.match(rf"^{marker}(?:[-_：:\s]|$)", value, re.IGNORECASE) for value in values)
+        for marker in markers
     ):
         return TRIPLE_TRANSGENIC_STRAIN
     return ""
@@ -90,16 +96,23 @@ def _pedigree_parent_codes(parents: Optional[str]) -> set[str]:
 
 
 def backfill_known_pedigree_strains(db: Session) -> int:
-    """Fill missing strains in user-confirmed families using exact pedigree links."""
+    """Fill missing strains for confirmed mice and families using exact ear tags."""
     rows_by_code = defaultdict(list)
     children_by_parent = defaultdict(set)
+    repaired = 0
+    repaired_strains = set()
     for row in [*db.query(Mouse).all(), *db.query(GenotypeRecord).all()]:
         code = row.mouse_code.strip().upper()
+        # Specific confirmed mice may differ from their parents' combined strain.
+        known_strain = KNOWN_MOUSE_STRAINS.get(code)
+        if known_strain and not (row.strain or "").strip():
+            row.strain = known_strain
+            repaired += 1
+            repaired_strains.add(known_strain)
         rows_by_code[code].append(row)
         for parent in _pedigree_parent_codes(row.parents):
             children_by_parent[parent].add(code)
 
-    repaired = 0
     for founder, strain in KNOWN_FOUNDER_STRAINS.items():
         pending = [founder]
         visited = set()
@@ -119,6 +132,8 @@ def backfill_known_pedigree_strains(db: Session) -> int:
             pending.extend(children_by_parent.get(code, ()))
         if any((row.strain or "").casefold() == strain.casefold() for code in visited for row in rows_by_code.get(code, [])):
             get_or_create_strain_record(db, strain)
+    for strain in repaired_strains:
+        get_or_create_strain_record(db, strain)
     db.flush()
     return repaired
 
