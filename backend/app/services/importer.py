@@ -9,6 +9,13 @@ from sqlalchemy.orm import Session
 from backend.app.models.models import Mouse, Cage, Claimer, TransferLog, Primer, GenotypeRecord, TransferRequest
 from backend.app.services.strain_service import infer_strain_from_genotypes, normalize_strain_name
 from backend.app.services.owner_service import sync_euthanasia_owner
+from backend.app.services.import_audit import record_import_logs
+from backend.app.services.genotype_service import (
+    normalize_genotype_value, sync_mouse_genotype_summary, upsert_imported_genotype,
+)
+from backend.app.services.import_report import (
+    ImportReport, is_existing_import_record, iter_import_rows, rollback_import_row, track_import,
+)
 
 INFERRED_PARENT_PLACEHOLDER_NOTE = "由基因鉴定父母关系推测录入"
 SYNTHETIC_IMPORT_ROOMS = {"常规鼠房", "枫林繁育", "枫林老鼠房"}
@@ -289,6 +296,7 @@ def get_or_create_claimer(db: Session, name: str, default_room: Optional[str] = 
         claimer = Claimer(name=clean_name, default_room=default_room, color=color)
         db.add(claimer)
         db.flush()
+    track_import(db, claimer)
     return claimer
 
 def get_or_create_cage(db: Session, cage_code: str, room: str, strain: str = "", gender: str = "M", **kwargs) -> Cage:
@@ -313,6 +321,7 @@ def get_or_create_cage(db: Session, cage_code: str, room: str, strain: str = "",
         for k, v in kwargs.items():
             if v and not getattr(cage, k, None):
                 setattr(cage, k, v)
+    track_import(db, cage)
     return cage
 
 def disambiguate_mouse_code(db: Session, code: str, cage_code: str, room: str, index: int) -> str:
@@ -321,11 +330,7 @@ def disambiguate_mouse_code(db: Session, code: str, cage_code: str, room: str, i
     if any(k in candidate.upper() for k in ["无耳标", "待", "C57", "WT", "野生", "纯合", "杂合", "未知"]) or candidate in ["F", "M", "未知"]:
         candidate = f"{candidate}_{room}_{cage_code}_{index}"
     
-    base_candidate = candidate
-    counter = 1
-    while db.query(Mouse).filter(Mouse.mouse_code == candidate).first():
-        counter += 1
-        candidate = f"{base_candidate}_{counter}"
+    # The room/cage/slot identity is stable across repeat imports.
     return candidate
 
 def split_mouse_codes(raw_val: Any) -> List[str]:
@@ -343,6 +348,9 @@ def split_mouse_codes(raw_val: Any) -> List[str]:
 
 def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any], inferred_genders: Dict[str, str], file_label: str = ""):
     """Intelligently detect sheets in workbook and import them into database"""
+    report = db.info.get("excel_import_report")
+    if report:
+        report.filename = file_label or report.filename
     sheetnames = wb.sheetnames
     processed_sheets = set()
 
@@ -351,6 +359,9 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
     for name in sheetnames:
         if is_historical_reference_sheet(wb[name], name):
             processed_sheets.add(name)
+            report = db.info.get("excel_import_report")
+            if report:
+                report.ignored_sheets.append({"filename": file_label, "sheet": name, "reason": "历史参考表，不作为当前小鼠导入"})
 
     # 1. Sheet '小鼠档案'
     for name in sheetnames:
@@ -365,11 +376,12 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
             parents_col = next((i for i, h in enumerate(header_row) if "父母" in h or "亲代" in h), 4)
             g1_col = next((i for i, h in enumerate(header_row) if "GENOTYPE 1" in h.upper() or "基因型1" in h), 6)
             g2_col = next((i for i, h in enumerate(header_row) if "GENOTYPE 2" in h.upper() or "基因型2" in h), 7)
+            g3_col = next((i for i, h in enumerate(header_row) if "GENOTYPE 3" in h.upper() or "基因型3" in h), None)
             op_col = next((i for i, h in enumerate(header_row) if "操作" in h), 8)
             notes_col = next((i for i, h in enumerate(header_row) if "备注" in h), 9)
             date_col = next((i for i, h in enumerate(header_row) if "测试日期" in h or h == "日期"), 0)
 
-            for row in ws.iter_rows(min_row=2, values_only=True):
+            for row_number, row in iter_import_rows(db, ws):
                 try:
                     code_raw = row[code_col] if len(row) > code_col else None
                     if code_raw is None: continue
@@ -381,8 +393,9 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
                     dob = parse_date(row[dob_col]) if len(row) > dob_col else None
                     gender = str(row[gender_col]).strip() if len(row) > gender_col and row[gender_col] else "未知"
                     parents = str(row[parents_col]).strip() if len(row) > parents_col and row[parents_col] else ""
-                    g1 = str(row[g1_col]).strip() if len(row) > g1_col and row[g1_col] else ""
-                    g2 = str(row[g2_col]).strip() if len(row) > g2_col and row[g2_col] else ""
+                    g1 = normalize_genotype_value(row[g1_col]) if len(row) > g1_col else None
+                    g2 = normalize_genotype_value(row[g2_col]) if len(row) > g2_col else None
+                    g3 = normalize_genotype_value(row[g3_col]) if g3_col is not None and len(row) > g3_col else None
                     op_rec = str(row[op_col]).strip() if len(row) > op_col and row[op_col] else ""
                     notes = str(row[notes_col]).strip() if len(row) > notes_col and row[notes_col] else ""
                     test_date = parse_date(row[date_col]) if len(row) > date_col else None
@@ -420,8 +433,20 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
                         if g1 and not mouse.genotype_1: mouse.genotype_1 = g1
                         if g2 and not mouse.genotype_2: mouse.genotype_2 = g2
                         if not mouse.source_room: mouse.source_room = "江湾发育所"
+                    track_import(db, mouse)
+                    # Archive sheets also contain real PCR results, even when the date is '/'.
+                    if any((g1, g2, g3)):
+                        gt_record, created = upsert_imported_genotype(
+                            db, mouse, test_date=test_date, strain=strain, dob=dob, gender=gender,
+                            parents=parents, genotype_1=g1, genotype_2=g2, genotype_3=g3,
+                            op_record=op_rec, notes=notes,
+                        )
+                        results["genotypes_imported"] += int(created)
+                        track_import(db, gt_record)
+                        sync_mouse_genotype_summary(mouse, db, preserve_empty_values=True)
                 except Exception as e:
-                    results["errors"].append(f"小鼠档案行解析错误: {str(e)}")
+                    rollback_import_row(db)
+                    results["errors"].append(f"{name} 第{row_number}行解析错误: {str(e)}")
             db.flush()
 
     # 2. Sheet '小鼠笼位信息'
@@ -429,7 +454,7 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
         if name == "小鼠笼位信息":
             processed_sheets.add(name)
             ws_cage = wb[name]
-            for row in ws_cage.iter_rows(min_row=2, values_only=True):
+            for row_number, row in iter_import_rows(db, ws_cage):
                 try:
                     cage_raw = row[0] if len(row) > 0 else None
                     if not cage_raw: continue
@@ -452,10 +477,9 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
                             m_code = str(c).strip()
                             mouse = db.query(Mouse).filter(Mouse.mouse_code == m_code).first()
                             if not mouse:
-                                prefix = f"{m_code}_江湾_{cage_code}_{idx+1}"
+                                prefix = disambiguate_mouse_code(db, m_code, cage_code, "江湾", idx+1)
                                 existing_in_cage = db.query(Mouse).filter(
-                                    Mouse.cage_id == cage.id,
-                                    Mouse.mouse_code.like(f"{prefix}%")
+                                    Mouse.mouse_code == prefix
                                 ).first()
                                 if existing_in_cage:
                                     mouse = existing_in_cage
@@ -473,12 +497,14 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
                                     db.add(mouse)
                                     results["mice_imported"] += 1
                             else:
-                                mouse.cage_id = cage.id
+                                if not is_existing_import_record(db, mouse):
+                                    mouse.cage_id = cage.id
                                 if not mouse.dob and dob: mouse.dob = dob
                                 if not mouse.strain and strain: mouse.strain = strain
+                            track_import(db, mouse)
                 except Exception as e:
-                    db.rollback()
-                    results["errors"].append(f"小鼠笼位信息解析错误: {str(e)}")
+                    rollback_import_row(db)
+                    results["errors"].append(f"{name} 第{row_number}行解析错误: {str(e)}")
             db.flush()
 
     # 3. Sheet '基因鉴定结果2306' or matching '基因鉴定'
@@ -511,7 +537,7 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
             merged_strains = merged_column_values(ws_gt, strain_col)
             merged_dobs = merged_column_values(ws_gt, dob_col)
 
-            for row_number, row in enumerate(ws_gt.iter_rows(min_row=2, values_only=True), 2):
+            for row_number, row in iter_import_rows(db, ws_gt):
                 try:
                     # Update date if present in date_col
                     raw_date = row[date_col] if date_col is not None and len(row) > date_col else None
@@ -592,33 +618,19 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
                         if not mouse.dob and dob: mouse.dob = dob
                         if not mouse.strain and strain: mouse.strain = strain
 
-                    existing_gt = db.query(GenotypeRecord).filter(
-                        GenotypeRecord.mouse_code == m_code,
-                        GenotypeRecord.test_date == test_date,
-                        GenotypeRecord.genotype_1 == g1,
-                        GenotypeRecord.genotype_2 == g2
-                    ).first()
-                    if existing_gt and not (existing_gt.strain or "").strip() and strain:
-                        existing_gt.strain = strain
-                    if not existing_gt:
-                        gt_record = GenotypeRecord(
-                            mouse_code=m_code,
-                            mouse_id=mouse.id,
-                            test_date=test_date,
-                            strain=strain,
-                            dob=dob,
-                            gender=gender,
-                            parents=parents,
-                            genotype_1=g1,
-                            genotype_2=g2,
-                            genotype_3=g3,
-                            op_record=op_rec,
-                            notes=notes
-                        )
-                        db.add(gt_record)
-                        results["genotypes_imported"] += 1
+                    track_import(db, mouse)
+
+                    gt_record, created = upsert_imported_genotype(
+                        db, mouse, test_date=test_date, strain=strain, dob=dob, gender=gender,
+                        parents=parents, genotype_1=g1, genotype_2=g2, genotype_3=g3,
+                        op_record=op_rec, notes=notes,
+                    )
+                    results["genotypes_imported"] += int(created)
+                    track_import(db, gt_record)
+                    sync_mouse_genotype_summary(mouse, db, preserve_empty_values=True)
                 except Exception as e:
-                    results["errors"].append(f"基因鉴定行解析错误: {str(e)}")
+                    rollback_import_row(db)
+                    results["errors"].append(f"{name} 第{row_number}行解析错误: {str(e)}")
             db.flush()
 
     # 4. Sheet '东四小鼠信息105-实时更新' or matching '东四'
@@ -626,7 +638,7 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
         if "东四" in name:
             processed_sheets.add(name)
             ws_ds = wb[name]
-            for row in ws_ds.iter_rows(min_row=2, values_only=True):
+            for row_number, row in iter_import_rows(db, ws_ds):
                 try:
                     cage_raw = row[1] if len(row) > 1 else None
                     if not cage_raw: continue
@@ -657,10 +669,9 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
                             m_code = str(c).strip()
                             mouse = db.query(Mouse).filter(Mouse.mouse_code == m_code).first()
                             if not mouse:
-                                prefix = f"{m_code}_{room}_{cage_code}_{idx+1}"
+                                prefix = disambiguate_mouse_code(db, m_code, cage_code, "东四", idx+1)
                                 existing_in_cage = db.query(Mouse).filter(
-                                    Mouse.cage_id == cage.id,
-                                    Mouse.mouse_code.like(f"{prefix}%")
+                                    Mouse.mouse_code == prefix
                                 ).first()
                                 if existing_in_cage:
                                     mouse = existing_in_cage
@@ -680,14 +691,16 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
                                     db.add(mouse)
                                     results["mice_imported"] += 1
                             else:
-                                mouse.cage_id = cage.id
-                                if owner:
+                                if not is_existing_import_record(db, mouse):
+                                    mouse.cage_id = cage.id
+                                if owner and not mouse.owner_id and not mouse.owner_name:
                                     mouse.owner_id = owner.id
                                     mouse.owner_name = owner.name
                                     mouse.status = "已领用"
+                            track_import(db, mouse)
                 except Exception as e:
-                    db.rollback()
-                    results["errors"].append(f"东四信息解析错误: {str(e)}")
+                    rollback_import_row(db)
+                    results["errors"].append(f"{name} 第{row_number}行解析错误: {str(e)}")
             db.flush()
 
     # 5. Sheet '实验动物楼小鼠信息405B-实时更新' or matching '405B'
@@ -695,7 +708,7 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
         if "405B" in name or "实验动物楼" in name:
             processed_sheets.add(name)
             ws_405 = wb[name]
-            for row in ws_405.iter_rows(min_row=2, values_only=True):
+            for row_number, row in iter_import_rows(db, ws_405):
                 try:
                     cage_raw = row[0] if len(row) > 0 else None
                     if not cage_raw: continue
@@ -720,10 +733,9 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
                             m_code = str(c).strip()
                             mouse = db.query(Mouse).filter(Mouse.mouse_code == m_code).first()
                             if not mouse:
-                                prefix = f"{m_code}_405B_{cage_code}_{idx+1}"
+                                prefix = disambiguate_mouse_code(db, m_code, cage_code, "405B", idx+1)
                                 existing_in_cage = db.query(Mouse).filter(
-                                    Mouse.cage_id == cage.id,
-                                    Mouse.mouse_code.like(f"{prefix}%")
+                                    Mouse.mouse_code == prefix
                                 ).first()
                                 if existing_in_cage:
                                     mouse = existing_in_cage
@@ -741,10 +753,12 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
                                     db.add(mouse)
                                     results["mice_imported"] += 1
                             else:
-                                mouse.cage_id = cage.id
+                                if not is_existing_import_record(db, mouse):
+                                    mouse.cage_id = cage.id
+                            track_import(db, mouse)
                 except Exception as e:
-                    db.rollback()
-                    results["errors"].append(f"405B信息解析错误: {str(e)}")
+                    rollback_import_row(db)
+                    results["errors"].append(f"{name} 第{row_number}行解析错误: {str(e)}")
             db.flush()
 
     # 6. Sheet '转鼠需求及反馈表' or matching '转鼠'
@@ -752,7 +766,7 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
         if "转鼠" in name:
             processed_sheets.add(name)
             ws_tr = wb[name]
-            for row in ws_tr.iter_rows(min_row=3, values_only=True):
+            for row_number, row in iter_import_rows(db, ws_tr, min_row=3):
                 try:
                     claimer_raw = row[2] if len(row) > 2 else None
                     if not claimer_raw: continue
@@ -792,49 +806,71 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
 
                     feedback_notes = str(row[15]).strip() if len(row) > 15 and row[15] else ""
 
-                    tr_req = TransferRequest(
-                        seq=seq_val,
-                        request_date=date_str or datetime.date.today().strftime("%Y-%m-%d"),
-                        demander=claimer_name,
-                        strain=strain,
-                        age_gender_req=age_gender_req,
-                        target_room=in_room,
-                        cage_count=cage_cnt,
-                        source_room=out_room,
-                        mouse_gender=m_gender,
-                        mouse_codes=", ".join(codes),
-                        status=status,
-                        feedback=feedback_notes,
-                        handler="系统导入"
-                    )
-                    db.add(tr_req)
-                    results["transfer_requests_imported"] += 1
+                    request_date = date_str or ""
+                    codes = sorted(set(codes))
+                    joined_codes = ", ".join(codes)
+                    tr_req = db.query(TransferRequest).filter_by(
+                        seq=seq_val, request_date=request_date, demander=claimer_name,
+                        strain=strain, age_gender_req=age_gender_req, target_room=in_room,
+                        source_room=out_room, cage_count=cage_cnt,
+                    ).first()
+                    if not tr_req:
+                        tr_req = TransferRequest(
+                            seq=seq_val,
+                            request_date=request_date,
+                            demander=claimer_name,
+                            strain=strain,
+                            age_gender_req=age_gender_req,
+                            target_room=in_room,
+                            cage_count=cage_cnt,
+                            source_room=out_room,
+                            mouse_gender=m_gender,
+                            mouse_codes=joined_codes,
+                            status=status,
+                            feedback=feedback_notes,
+                            handler="系统导入"
+                        )
+                        db.add(tr_req)
+                        results["transfer_requests_imported"] += 1
+                    track_import(db, tr_req)
 
                     if codes:
-                        log = TransferLog(
+                        logs = db.query(TransferLog).filter_by(
                             action_type="转鼠/领用",
-                            mouse_codes=", ".join(codes),
-                            mouse_count=len(codes),
-                            claimer_name=claimer_name,
-                            source_room=out_room,
-                            target_room=in_room,
-                            date=date_str or "",
-                            status=status,
-                            notes=f"品系: {strain}; 要求: {age_gender_req}"
-                        )
-                        db.add(log)
-                        results["transfers_imported"] += 1
+                            claimer_name=claimer_name, source_room=out_room,
+                            target_room=in_room, date=date_str or "",
+                        ).all()
+                        # Older imports kept the Excel column order; compare the code set.
+                        log = next((item for item in logs if sorted(set(split_mouse_codes(item.mouse_codes))) == codes), None)
+                        is_new_log = log is None
+                        if is_new_log:
+                            log = TransferLog(
+                                action_type="转鼠/领用",
+                                mouse_codes=joined_codes,
+                                mouse_count=len(codes),
+                                claimer_name=claimer_name,
+                                source_room=out_room,
+                                target_room=in_room,
+                                date=date_str or "",
+                                status=status,
+                                notes=f"品系: {strain}; 要求: {age_gender_req}"
+                            )
+                            db.add(log)
+                            results["transfers_imported"] += 1
+                        track_import(db, log)
 
-                        if status == "已转":
+                        if is_new_log and status == "已转":
                             for code in codes:
                                 mouse = db.query(Mouse).filter(Mouse.mouse_code == code).first()
-                                if mouse and not mouse.owner_id:
+                                if mouse and not mouse.owner_id and not mouse.owner_name:
                                     mouse.owner_id = claimer.id
                                     mouse.owner_name = claimer.name
                                     mouse.status = "已领用"
                                     mouse.claim_date = date_str
+                                    track_import(db, mouse)
                 except Exception as e:
-                    results["errors"].append(f"转鼠申请行解析错误: {str(e)}")
+                    rollback_import_row(db)
+                    results["errors"].append(f"{name} 第{row_number}行解析错误: {str(e)}")
             db.flush()
 
     # 7. Sheet '引物总表' or matching '引物'
@@ -842,7 +878,7 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
         if "引物" in name:
             processed_sheets.add(name)
             ws_pm = wb[name]
-            for row in ws_pm.iter_rows(min_row=2, values_only=True):
+            for row_number, row in iter_import_rows(db, ws_pm):
                 try:
                     strain_short = str(row[1]).strip() if len(row) > 1 and row[1] else ""
                     seq = str(row[7]).strip() if len(row) > 7 and row[7] else ""
@@ -874,8 +910,10 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
                         )
                         db.add(primer)
                         results["primers_imported"] += 1
+                    track_import(db, existing or primer)
                 except Exception as e:
-                    results["errors"].append(f"引物行解析错误: {str(e)}")
+                    rollback_import_row(db)
+                    results["errors"].append(f"{name} 第{row_number}行解析错误: {str(e)}")
             db.flush()
 
     # Historical breeding, old summary, and strain-reference sheets were already
@@ -898,7 +936,7 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
             owner_col = next((i for i, c in enumerate(ws[1]) if c.value and ("拥有者" in str(c.value) or "领取" in str(c.value) or "责任人" in str(c.value))), None)
             parents_col = next((i for i, c in enumerate(ws[1]) if c.value and "父母" in str(c.value)), None)
 
-            for r in ws.iter_rows(min_row=2, values_only=True):
+            for row_number, r in iter_import_rows(db, ws):
                 try:
                     if code_col is not None and len(r) > code_col and r[code_col]:
                         raw_codes = split_mouse_codes(r[code_col])
@@ -942,13 +980,14 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
                                 if not existing.strain and strain: existing.strain = strain
                                 if not existing.dob and dob: existing.dob = dob
                                 if not existing.parents and parents: existing.parents = parents
-                                if owner_id and not existing.owner_id:
+                                if owner_id and not existing.owner_id and not existing.owner_name:
                                     existing.owner_id = owner_id
                                     existing.owner_name = owner_name
                                     existing.status = "已领用"
+                            track_import(db, existing or m)
                 except Exception as e:
-                    db.rollback()
-                    results["errors"].append(f"表格 {name} 行解析错误: {str(e)}")
+                    rollback_import_row(db)
+                    results["errors"].append(f"{name} 第{row_number}行解析错误: {str(e)}")
             db.flush()
 
 def normalize_cage_statuses(db: Session) -> int:
@@ -956,17 +995,22 @@ def normalize_cage_statuses(db: Session) -> int:
     db.flush()
     mice = db.query(Mouse).filter(Mouse.cage_id.is_(None)).all()
     changed = 0
+    report = db.info.get("excel_import_report")
     for mouse in mice:
+        if report and report.existed(mouse):
+            continue
         if mouse.status != "出笼":
             mouse.status = "出笼"
             changed += 1
     for mouse in db.query(Mouse).filter(Mouse.cage_id.isnot(None), Mouse.status == "出笼").all():
+        if report and report.existed(mouse):
+            continue
         mouse.status = "已领用" if mouse.owner_id or mouse.owner_name else "在笼"
     sync_euthanasia_owner(db)
     return changed
 
 
-def import_single_excel_file(db: Session, file_path: str, original_filename: str = "") -> Dict[str, Any]:
+def _import_single_excel_file(db: Session, file_path: str, original_filename: str = "") -> Dict[str, Any]:
     """Import a single uploaded Excel file"""
     results = {
         "mice_imported": 0,
@@ -987,6 +1031,7 @@ def import_single_excel_file(db: Session, file_path: str, original_filename: str
         import_workbook(db, wb, results, inferred_genders, label)
     except Exception as e:
         results["errors"].append(f"{label} 加载失败: {str(e)}")
+        return results
 
     results["inferred_genders_count"] += apply_inferred_parent_genders(db, inferred_genders)
     remove_inferred_parent_placeholders(db)
@@ -994,10 +1039,9 @@ def import_single_excel_file(db: Session, file_path: str, original_filename: str
     cleanup_invalid_genotype_mice(db)
     results["out_of_cage_updated"] = normalize_cage_statuses(db)
 
-    db.commit()
     return results
 
-def import_local_excel_folder(db: Session, folder_path: str) -> Dict[str, Any]:
+def _import_local_excel_folder(db: Session, folder_path: str) -> Dict[str, Any]:
     """Import all Excel files from the given folder"""
     results = {
         "mice_imported": 0,
@@ -1039,5 +1083,37 @@ def import_local_excel_folder(db: Session, folder_path: str) -> Dict[str, Any]:
     cleanup_invalid_genotype_mice(db)
     results["out_of_cage_updated"] = normalize_cage_statuses(db)
 
-    db.commit()
     return results
+
+
+def run_reported_import(db: Session, filename: str, operation, operator: str = "系统导入") -> Dict[str, Any]:
+    # SQLite's legacy transaction mode does not BEGIN for reads or SAVEPOINTs.
+    # Start the outer transaction so row savepoints remain part of one file import.
+    connection = db.connection()
+    if connection.dialect.name == "sqlite" and not connection.connection.driver_connection.in_transaction:
+        connection.exec_driver_sql("BEGIN")
+    report = ImportReport(db, filename)
+    db.info["excel_import_report"] = report
+    try:
+        results = operation()
+        report.finish(db, results)
+        record_import_logs(db, results["report"], operator)
+        db.commit()
+        return results
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.info.pop("excel_import_report", None)
+
+
+def import_single_excel_file(db: Session, file_path: str, original_filename: str = "", operator: str = "系统导入") -> Dict[str, Any]:
+    return run_reported_import(
+        db, original_filename or os.path.basename(file_path),
+        lambda: _import_single_excel_file(db, file_path, original_filename),
+        operator,
+    )
+
+
+def import_local_excel_folder(db: Session, folder_path: str, operator: str = "系统导入") -> Dict[str, Any]:
+    return run_reported_import(db, "本地 Excel 文件夹", lambda: _import_local_excel_folder(db, folder_path), operator)

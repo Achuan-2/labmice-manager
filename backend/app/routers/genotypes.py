@@ -10,28 +10,12 @@ from backend.app.schemas.schemas import (
     GenotypeRecordCreate, GenotypeRecordUpdate, GenotypeRecordResponse
 )
 from backend.app.auth import require_auth, require_admin
+from backend.app.services.genotype_service import sync_mouse_genotype_summary as _sync_mouse_genotype_summary
 
 from sqlalchemy import or_, case
 
 router = APIRouter(prefix="/api/genotypes", tags=["Genotypes"])
 
-
-def _sync_mouse_genotype_summary(mouse: Optional[Mouse], db: Session) -> None:
-    """Keep the mouse archive summary aligned with its latest genotype record."""
-    if not mouse:
-        return
-    latest = (
-        db.query(GenotypeRecord)
-        .filter(or_(
-            GenotypeRecord.mouse_id == mouse.id,
-            GenotypeRecord.mouse_code == mouse.mouse_code,
-        ))
-        .order_by(GenotypeRecord.test_date.desc(), GenotypeRecord.id.desc())
-        .first()
-    )
-    mouse.genotype_1 = latest.genotype_1 if latest else None
-    mouse.genotype_2 = latest.genotype_2 if latest else None
-    mouse.test_date = latest.test_date if latest else None
 
 @router.get("")
 def list_genotypes(

@@ -5,7 +5,7 @@
       <div>
         <div class="text-base font-bold text-gray-800">变动日志</div>
         <div class="text-xs text-gray-500 mt-1">
-          记录新增小鼠、领取人指定、鼠房转移、换笼与状态变更，方便追溯
+          记录 Excel 导入、新增小鼠、领取人指定、鼠房转移、换笼与状态变更，方便追溯
         </div>
       </div>
 
@@ -20,6 +20,7 @@
         />
         <el-select v-model="filters.action_type" clearable placeholder="全部操作类型" style="width: 140px" @change="searchTransfers">
           <el-option label="新增小鼠" value="新增小鼠" />
+          <el-option label="导入数据" value="导入数据" />
           <el-option label="设置领取人" value="设置领取人" />
           <el-option label="转鼠/领用" value="转鼠/领用" />
           <el-option label="转鼠审批" value="转鼠/审批处理" />
@@ -69,7 +70,8 @@
 
         <el-table-column prop="mouse_count" label="数量" width="80" align="center">
           <template #default="{ row }">
-            <el-tag size="small" type="info">{{ row.mouse_count || 1 }} 只</el-tag>
+            <el-tag v-if="row.action_type !== '导入数据' || row.mouse_count" size="small" type="info">{{ row.mouse_count ?? 1 }} 只</el-tag>
+            <span v-else class="text-gray-400 text-xs">-</span>
           </template>
         </el-table-column>
 
@@ -91,7 +93,8 @@
 
         <el-table-column label="位置变化" min-width="180">
           <template #default="{ row }">
-            <div class="text-xs flex items-center gap-1">
+            <span v-if="row.action_type === '导入数据'" class="text-gray-400 text-xs">详见导入明细</span>
+            <div v-else class="text-xs flex items-center gap-1">
               <span class="text-gray-500">{{ row.source_room || (row.action_type === '新增小鼠' ? '新增' : '未记录鼠房') }}</span>
               <span v-if="row.source_cage" class="text-amber-600 font-mono font-bold">({{ row.source_cage }})</span>
               <template v-if="row.target_room || row.target_cage">
@@ -115,7 +118,11 @@
 
         <el-table-column prop="notes" label="备注说明" min-width="160">
           <template #default="{ row }">
-            <span class="text-xs text-gray-500">{{ row.notes || '-' }}</span>
+            <template v-if="row.action_type === '导入数据'">
+              <div class="text-xs text-gray-500">{{ (row.notes || '').split('\n').slice(0, 2).join('；') }}</div>
+              <el-button link type="primary" size="small" @click="selectedImportLog = row">查看导入明细</el-button>
+            </template>
+            <span v-else class="text-xs text-gray-500">{{ row.notes || '-' }}</span>
           </template>
         </el-table-column>
       </el-table>
@@ -136,6 +143,14 @@
       v-model="showMouseDetailModal"
       :mouse-code="selectedMouseCode"
     />
+    <el-dialog :model-value="!!selectedImportLog" title="导入数据明细" width="min(1000px, 95vw)"
+      @update:model-value="value => { if (!value) selectedImportLog = null }">
+      <template v-if="selectedImportLog">
+        <p class="text-sm text-gray-500 mb-3">{{ selectedImportLog.date }} · 经办人：{{ selectedImportLog.operator }}</p>
+        <div class="max-h-[60vh] overflow-auto whitespace-pre-wrap text-sm leading-6">{{ selectedImportLog.notes }}</div>
+      </template>
+      <template #footer><el-button type="primary" @click="selectedImportLog = null">关闭</el-button></template>
+    </el-dialog>
   </div>
 </template>
 
@@ -150,6 +165,7 @@ const { getClaimerTagStyle, fetchClaimerColors } = useClaimerColors()
 
 const loading = ref(false)
 const transfers = ref([])
+const selectedImportLog = ref(null)
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(50)

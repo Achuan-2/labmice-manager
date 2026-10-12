@@ -19,31 +19,34 @@
             {{ lastImportResult.message }}
           </el-tag>
         </div>
-        <el-button link size="small" type="info" @click="lastImportResult = null">关闭反馈</el-button>
+        <div>
+          <el-button link size="small" type="primary" @click="importResultVisible = true">查看导入明细</el-button>
+          <el-button link size="small" type="info" @click="lastImportResult = null">关闭反馈</el-button>
+        </div>
       </div>
 
       <!-- Quick Metrics Grid -->
       <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 mb-3">
         <div class="bg-gray-50 p-2.5 rounded-lg border border-gray-100 text-center">
-          <div class="text-xs text-gray-400 font-medium">小鼠追加/更新</div>
+          <div class="text-xs text-gray-400 font-medium">新增小鼠</div>
           <div class="text-lg font-bold text-blue-600 mt-0.5">
             {{ lastImportResult.details?.mice_imported || 0 }} <span class="text-xs font-normal text-gray-500">只</span>
           </div>
         </div>
         <div class="bg-gray-50 p-2.5 rounded-lg border border-gray-100 text-center">
-          <div class="text-xs text-gray-400 font-medium">笼位同步</div>
+          <div class="text-xs text-gray-400 font-medium">新增笼位</div>
           <div class="text-lg font-bold text-green-600 mt-0.5">
             {{ lastImportResult.details?.cages_imported || 0 }} <span class="text-xs font-normal text-gray-500">个</span>
           </div>
         </div>
         <div class="bg-gray-50 p-2.5 rounded-lg border border-gray-100 text-center">
-          <div class="text-xs text-gray-400 font-medium">基因鉴定</div>
+          <div class="text-xs text-gray-400 font-medium">新增基因鉴定</div>
           <div class="text-lg font-bold text-purple-600 mt-0.5">
             {{ lastImportResult.details?.genotypes_imported || 0 }} <span class="text-xs font-normal text-gray-500">条</span>
           </div>
         </div>
         <div class="bg-gray-50 p-2.5 rounded-lg border border-gray-100 text-center">
-          <div class="text-xs text-gray-400 font-medium">转鼠需求</div>
+          <div class="text-xs text-gray-400 font-medium">新增转鼠需求</div>
           <div class="text-lg font-bold text-indigo-600 mt-0.5">
             {{ lastImportResult.details?.transfer_requests_imported || 0 }} <span class="text-xs font-normal text-gray-500">条</span>
           </div>
@@ -55,7 +58,7 @@
           </div>
         </div>
         <div class="bg-gray-50 p-2.5 rounded-lg border border-gray-100 text-center">
-          <div class="text-xs text-gray-400 font-medium">引物记录</div>
+          <div class="text-xs text-gray-400 font-medium">新增引物记录</div>
           <div class="text-lg font-bold text-teal-600 mt-0.5">
             {{ lastImportResult.details?.primers_imported || 0 }} <span class="text-xs font-normal text-gray-500">条</span>
           </div>
@@ -94,7 +97,7 @@
             <span class="text-base font-bold text-gray-800">上传新 Excel 表格导入</span>
           </div>
           <div class="text-xs text-gray-500 leading-relaxed mb-4">
-            支持拖拽上传实验室更新的 <code class="bg-gray-100 px-1 py-0.5 rounded text-blue-600 font-mono">.xlsx</code> 或 <code class="bg-gray-100 px-1 py-0.5 rounded text-blue-600 font-mono">.xls</code> 文件。支持<strong>同时选择多个文件</strong>或多次连续上传，系统将智能识别表头并追加小鼠档案、笼位芯片及基因鉴定记录。
+            支持拖拽上传实验室更新的 <code class="bg-gray-100 px-1 py-0.5 rounded text-blue-600 font-mono">.xlsx</code> 或 <code class="bg-gray-100 px-1 py-0.5 rounded text-blue-600 font-mono">.xls</code> 文件。支持<strong>同时选择多个文件</strong>或多次连续上传，系统自动识别重复记录，导入后弹窗显示新增、补充和跳过明细。
           </div>
 
           <el-upload
@@ -204,6 +207,7 @@
         </div>
       </div>
     </div>
+    <ImportResultDialog v-model="importResultVisible" :result="lastImportResult" />
   </div>
 </template>
 
@@ -212,6 +216,7 @@ import { ref } from 'vue'
 import { importExportApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import ImportResultDialog from '@/components/ImportResultDialog.vue'
 
 const authStore = useAuthStore()
 
@@ -221,6 +226,7 @@ const uploading = ref(false)
 const exportingMice = ref(false)
 const exportingCages = ref(false)
 const lastImportResult = ref(null)
+const importResultVisible = ref(false)
 const databaseInput = ref(null)
 const exportingDatabase = ref(false)
 const restoringDatabase = ref(false)
@@ -274,6 +280,7 @@ function clearAllFiles() {
 }
 
 async function submitUpload() {
+  if (uploading.value) return
   if (!authStore.isAdmin) {
     ElMessage.error('仅管理员可执行导入操作')
     return
@@ -296,8 +303,10 @@ async function submitUpload() {
     })
 
     const res = await importExportApi.uploadExcel(formData)
-    ElMessage.success(res.message || '上传并解析完成！')
+    if (res.details?.errors?.length) ElMessage.warning('部分数据解析失败，请查看导入明细')
+    else ElMessage.success(res.message || '上传并解析完成！')
     lastImportResult.value = res
+    importResultVisible.value = true
 
     // Clear file list completely so user can immediately upload more files
     clearAllFiles()

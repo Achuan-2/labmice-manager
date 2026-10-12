@@ -17,7 +17,7 @@ from backend.app.services.database_backup import snapshot, restore_database
 from backend.app.models.models import Mouse, Cage, Claimer, TransferLog, Primer, User
 from backend.app.services.importer import import_local_excel_folder, import_single_excel_file
 from backend.app.services.owner_service import sync_euthanasia_owner
-from backend.app.services.strain_service import normalize_strain_name, sync_and_normalize_all_strains
+from backend.app.services.strain_service import normalize_strain_name
 from backend.app.auth import require_admin, require_auth
 
 router = APIRouter(prefix="/api/import-export", tags=["Import & Export"])
@@ -77,7 +77,7 @@ def init_from_local_excel(db: Session = Depends(get_db), current_user: User = De
     if not os.path.exists(excel_dir):
         raise HTTPException(status_code=404, detail="未找到 excel 文件夹")
 
-    results = import_local_excel_folder(db, excel_dir)
+    results = import_local_excel_folder(db, excel_dir, operator=current_user.display_name or current_user.username)
     return {
         "success": True,
         "message": "导入完成",
@@ -110,7 +110,11 @@ async def upload_excel(
         "genotypes_imported": 0,
         "inferred_genders_count": 0,
         "primers_imported": 0,
-        "errors": []
+        "errors": [],
+        "report": {
+            "summary": {"added": 0, "updated": 0, "skipped": 0, "removed": 0},
+            "records": [], "ignored_sheets": [],
+        },
     }
     file_summaries = []
 
@@ -135,7 +139,10 @@ async def upload_excel(
             f.write(content)
 
         try:
-            results = import_single_excel_file(db, temp_path, original_filename=file.filename)
+            results = import_single_excel_file(
+                db, temp_path, original_filename=file.filename,
+                operator=current_user.display_name or current_user.username,
+            )
             for k in [
                 "mice_imported", "cages_imported", "claimers_imported",
                 "transfers_imported", "transfer_requests_imported",
@@ -145,18 +152,18 @@ async def upload_excel(
             if results.get("errors"):
                 combined_results["errors"].extend(results["errors"])
 
-            file_items = (
-                results.get("mice_imported", 0) +
-                results.get("cages_imported", 0) +
-                results.get("genotypes_imported", 0) +
-                results.get("transfers_imported", 0) +
-                results.get("transfer_requests_imported", 0) +
-                results.get("primers_imported", 0)
-            )
+            report = results["report"]
+            for status, count in report["summary"].items():
+                combined_results["report"]["summary"][status] += count
+            combined_results["report"]["records"].extend(report["records"])
+            combined_results["report"]["ignored_sheets"].extend(report["ignored_sheets"])
+
+            file_items = report["summary"]["added"] + report["summary"]["updated"]
             file_summaries.append({
                 "filename": file.filename,
-                "success": True,
+                "success": not results["errors"] or file_items > 0,
                 "imported_count": file_items,
+                "error": "；".join(results["errors"]),
                 "details": results
             })
         except Exception as e:
@@ -168,42 +175,14 @@ async def upload_excel(
                 "imported_count": 0
             })
 
-    try:
-        sync_and_normalize_all_strains(db)
-    except Exception:
-        pass
-
-    msg_parts = []
-    if combined_results["mice_imported"] > 0:
-        msg_parts.append(f"{combined_results['mice_imported']} 只小鼠")
-    if combined_results["cages_imported"] > 0:
-        msg_parts.append(f"{combined_results['cages_imported']} 个笼位")
-    if combined_results["genotypes_imported"] > 0:
-        msg_parts.append(f"{combined_results['genotypes_imported']} 条基因鉴定")
-    if combined_results["transfer_requests_imported"] > 0:
-        msg_parts.append(f"{combined_results['transfer_requests_imported']} 条转鼠申请")
-    if combined_results["inferred_genders_count"] > 0:
-        msg_parts.append(f"推断完善 {combined_results['inferred_genders_count']} 个亲本性别")
-    if combined_results["primers_imported"] > 0:
-        msg_parts.append(f"{combined_results['primers_imported']} 条引物记录")
-
-    total_items = (
-        combined_results["mice_imported"] +
-        combined_results["cages_imported"] +
-        combined_results["genotypes_imported"] +
-        combined_results["transfers_imported"] +
-        combined_results["transfer_requests_imported"] +
-        combined_results["primers_imported"]
-    )
-
-    if len(upload_files) == 1:
-        single_res = file_summaries[0]
-        if not single_res["success"]:
-            raise HTTPException(status_code=500, detail=f"文件解析失败: {single_res.get('error')}")
-        summary_msg = f"成功解析导入：" + "、".join(msg_parts) if msg_parts else "文件已成功解析（未发现新数据需写入）"
-    else:
-        success_count = sum(1 for s in file_summaries if s["success"])
-        summary_msg = f"已批量解析 {len(upload_files)} 个文件（成功 {success_count} 个，追加：" + "、".join(msg_parts) + "）" if msg_parts else f"已批量解析 {len(upload_files)} 个文件（成功 {success_count} 个）"
+    await form.close()
+    summary = combined_results["report"]["summary"]
+    total_items = summary["added"] + summary["updated"]
+    summary_msg = f"导入完成：新增 {summary['added']} 项，补充/更新 {summary['updated']} 项，重复跳过 {summary['skipped']} 项"
+    if summary["removed"]:
+        summary_msg += f"，清理无效记录 {summary['removed']} 项"
+    if combined_results["errors"]:
+        summary_msg += f"，解析失败 {len(combined_results['errors'])} 项（详见明细）"
 
     return {
         "success": True,
