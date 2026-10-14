@@ -6,9 +6,10 @@ from sqlalchemy.orm import Session
 from backend.app.database import get_db
 from backend.app.models.models import TransferRequest, TransferRequestAssignment, Mouse, User
 from backend.app.services.transfer_assignment_service import reconcile_assignments, parse_codes
+from backend.app.services.transfer_request_service import require_request_owner, require_pending_application
 from backend.app.routers.mice import enrich_mouse_response
 from backend.app.schemas.schemas import (
-    TransferRequestCreate, TransferRequestUpdate, TransferRequestResponse
+    TransferRequestCreate, TransferRequestEdit, TransferRequestUpdate, TransferRequestResponse
 )
 from backend.app.auth import require_auth, require_admin
 
@@ -64,6 +65,8 @@ def create_transfer_request(
         age_gender_req=data.age_gender_req or "成年/无要求",
         target_room=target_room,
         cage_count=data.cage_count or 1,
+        requested_mouse_count=data.requested_mouse_count,
+        created_by_username=current_user.username,
         source_room=data.source_room,
         mouse_gender=data.mouse_gender,
         mouse_codes=data.mouse_codes,
@@ -75,6 +78,32 @@ def create_transfer_request(
     db.commit()
     db.refresh(req)
     return req
+
+@router.put("/{request_id}/application", response_model=TransferRequestResponse)
+def edit_transfer_request(
+    request_id: int,
+    data: TransferRequestEdit,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    req = db.get(TransferRequest, request_id)
+    if req is None:
+        raise HTTPException(404, "转鼠申请未找到")
+    require_request_owner(req, current_user)
+    require_pending_application(db, req)
+
+    updates = data.model_dump()
+    for field, label in (("demander", "需求者姓名"), ("strain", "小鼠品系"), ("target_room", "期望转入鼠房")):
+        updates[field] = updates[field].strip()
+        if not updates[field]:
+            raise HTTPException(400, f"{label}不能为空")
+    for field, value in updates.items():
+        setattr(req, field, value)
+    # Preserve the submitter and processing metadata when editing the application.
+    db.commit()
+    db.refresh(req)
+    return req
+
 
 @router.get("/{request_id}/assigned-mice")
 def get_assigned_mice(request_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
@@ -124,11 +153,14 @@ def process_transfer_request(
 def delete_transfer_request(
     request_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin)
+    current_user: User = Depends(require_auth)
 ):
     req = db.query(TransferRequest).filter(TransferRequest.id == request_id).first()
     if not req:
         raise HTTPException(status_code=404, detail="转鼠申请未找到")
+    require_request_owner(req, current_user)
+    if current_user.role != "admin":
+        require_pending_application(db, req)
     try:
         reconcile_assignments(db, req, {"status": "取消"}, current_user.display_name or current_user.username)
         db.flush()

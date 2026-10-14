@@ -104,6 +104,11 @@
         </el-table-column>
         <el-table-column prop="target_room" label="期望转入鼠房" width="130" />
         <el-table-column prop="cage_count" label="笼位数" width="90" align="center" />
+        <el-table-column prop="requested_mouse_count" label="申请只数" width="100" align="center">
+          <template #default="{ row }">
+            <span>{{ row.requested_mouse_count == null ? '未填写' : `${row.requested_mouse_count} 只` }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
             <el-tag size="small" :type="row.status === '进行中' ? 'primary' : 'warning'">

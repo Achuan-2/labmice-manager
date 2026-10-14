@@ -169,6 +169,8 @@ class TransferRequest(Base):
     age_gender_req = Column(String(128), nullable=True)  # 年龄/性别要求 (如 "成年/雄鼠")
     target_room = Column(String(64), index=True, nullable=True)  # 转入鼠房 (如 "东五", "东四")
     cage_count = Column(Integer, default=1)  # 笼位数量
+    requested_mouse_count = Column(Integer, nullable=True)  # 申请小鼠数量，不代表实际分配数量
+    created_by_username = Column(String(64), nullable=True)  # 账号库独立存储，以不可编辑的登录名标识提交者
     source_room = Column(String(64), nullable=True)  # 转出鼠房 (如 "枫林", "江湾")
     mouse_gender = Column(String(32), nullable=True)  # 小鼠实际性别 (M, F, M/F)
     mouse_codes = Column(Text, nullable=True)  # 分配的小鼠编号，逗号隔开 (如 "E962, E964")

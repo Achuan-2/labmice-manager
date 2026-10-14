@@ -109,6 +109,7 @@ export const transferRequestsApi = {
   getAssignedMice: (id) => api.get(`/transfer-requests/${id}/assigned-mice`),
   listRequests: (params) => api.get('/transfer-requests', { params }),
   createRequest: (data) => api.post('/transfer-requests', data),
+  editRequest: (id, data) => api.put(`/transfer-requests/${id}/application`, data),
   processRequest: (id, data) => api.put(`/transfer-requests/${id}`, data),
   deleteRequest: (id) => api.delete(`/transfer-requests/${id}`),
 }

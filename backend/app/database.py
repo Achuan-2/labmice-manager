@@ -63,6 +63,16 @@ def migrate_room_category():
             connection.exec_driver_sql("ALTER TABLE rooms ADD COLUMN category VARCHAR(32)")
 
 
+def migrate_transfer_request_fields():
+    """Keep existing requests without a specified mouse quantity unset."""
+    with engine.begin() as connection:
+        columns = connection.exec_driver_sql("PRAGMA table_info(transfer_requests)").fetchall()
+        if columns and not any(column[1] == "requested_mouse_count" for column in columns):
+            connection.exec_driver_sql("ALTER TABLE transfer_requests ADD COLUMN requested_mouse_count INTEGER")
+        if columns and not any(column[1] == "created_by_username" for column in columns):
+            connection.exec_driver_sql("ALTER TABLE transfer_requests ADD COLUMN created_by_username VARCHAR(64)")
+
+
 def migrate_todo_fields():
     with engine.begin() as connection:
         cage_columns = connection.exec_driver_sql("PRAGMA table_info(cages)").fetchall()

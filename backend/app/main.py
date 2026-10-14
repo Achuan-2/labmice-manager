@@ -5,7 +5,10 @@ from starlette.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from backend.app.database import SessionLocal, BASE_DIR, create_business_tables, migrate_room_category, migrate_todo_fields
+from backend.app.database import (
+    SessionLocal, BASE_DIR, create_business_tables,
+    migrate_room_category, migrate_todo_fields, migrate_transfer_request_fields,
+)
 from backend.app.auth_database import AuthSessionLocal, initialize_auth_database
 from backend.app.models.models import Mouse, User, SystemSetting, Claimer, Room
 from backend.app.auth import init_default_admin
@@ -37,12 +40,14 @@ from backend.app.services.strain_service import sync_and_normalize_all_strains
 from backend.app.services.mouse_status_service import sync_mouse_statuses
 from backend.app.services.owner_service import sync_euthanasia_owner
 from backend.app.services.settings_service import get_public_settings
+from backend.app.services.transfer_request_service import backfill_request_creators
 
 # Create database tables
 create_business_tables()
 initialize_auth_database(User.__table__, (SystemSetting.__table__,))
 migrate_room_category()
 migrate_todo_fields()
+migrate_transfer_request_fields()
 
 app = FastAPI(
     title="课题组小鼠管理系统",
@@ -70,6 +75,7 @@ def startup_event():
     db = SessionLocal()
     try:
         init_default_admin(auth_db)
+        backfill_request_creators(db, auth_db)
         
         mouse_count = db.query(Mouse).count()
         if mouse_count == 0:

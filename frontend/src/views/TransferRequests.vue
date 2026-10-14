@@ -178,6 +178,25 @@
           </template>
         </el-table-column>
 
+        <el-table-column prop="requested_mouse_count" width="110" align="center">
+          <template #header>
+            <ExcelSortHeader
+              prop="requested_mouse_count"
+              label="申请只数"
+              asc-text="从少到多"
+              desc-text="从多到少"
+              align="center"
+              :active-prop="sortConfig.prop"
+              :active-order="sortConfig.order"
+              @sort="toggleSort"
+              @clear="clearSort"
+            />
+          </template>
+          <template #default="{ row }">
+            <span>{{ row.requested_mouse_count == null ? '未填写' : `${row.requested_mouse_count} 只` }}</span>
+          </template>
+        </el-table-column>
+
         <el-table-column prop="source_room" width="125">
           <template #header>
             <ExcelSortHeader
@@ -244,12 +263,14 @@
 
         <el-table-column prop="handler" label="经办人" width="100" />
 
-        <!-- Admin Operation Column -->
-        <el-table-column v-if="authStore.isAdmin" label="操作" width="150" fixed="right">
+        <el-table-column label="操作" :width="authStore.isAdmin ? 205 : 110" fixed="right">
           <template #default="{ row }">
             <div class="flex items-center gap-1">
+              <el-button v-if="canEditApplication(row)" size="small" type="primary" link @click="openEditDialog(row)">
+                编辑
+              </el-button>
               <el-button
-                v-if="row.status === '进行中'"
+                v-if="authStore.isAdmin && row.status === '进行中'"
                 size="small"
                 type="success"
                 link
@@ -259,7 +280,7 @@
                 点击完成
               </el-button>
               <el-button
-                v-if="row.status === '进行中'"
+                v-if="authStore.isAdmin && row.status === '进行中'"
                 size="small"
                 type="primary"
                 link
@@ -268,7 +289,7 @@
                 编辑
               </el-button>
               <el-button
-                v-if="row.status !== '进行中'"
+                v-if="authStore.isAdmin && row.status !== '进行中'"
                 size="small"
                 type="primary"
                 link
@@ -277,8 +298,8 @@
                 {{ isCompletedStatus(row.status) ? '查看' : '审批处理' }}
               </el-button>
               <el-popconfirm
-                v-if="row.status !== '进行中'"
-                title="确定删除此需求？已分配的小鼠将撤销分配并恢复原笼位。"
+                v-if="(authStore.isAdmin && row.status !== '进行中') || (!authStore.isAdmin && canEditApplication(row))"
+                :title="row.status === '申请中' ? '确定删除此申请？' : '确定删除此需求？已分配的小鼠将撤销分配并恢复原笼位。'"
                 @confirm="handleDelete(row.id)"
               >
                 <template #reference>
@@ -292,7 +313,7 @@
     </div>
 
     <!-- Submit Request Dialog (Anyone / Guests) -->
-    <el-dialog v-model="showSubmitDialog" title="提交转鼠需求申请" width="540px">
+    <el-dialog v-model="showSubmitDialog" :title="editingRequestId == null ? '提交转鼠需求申请' : '编辑转鼠需求申请'" width="540px">
       <el-form :model="submitForm" :rules="submitRules" ref="submitFormRef" label-width="125px">
         <el-form-item label="需求者姓名" prop="demander" required>
           <el-select
@@ -343,13 +364,17 @@
         <el-form-item label="申请笼位数量">
           <el-input-number v-model="submitForm.cage_count" :min="1" :max="10" />
         </el-form-item>
+        <el-form-item label="申请小鼠数量" prop="requested_mouse_count">
+          <el-input-number v-model="submitForm.requested_mouse_count" :min="1" :precision="0" :step="1" step-strictly placeholder="选填" />
+          <span class="text-xs text-gray-500 ml-2">只</span>
+        </el-form-item>
         <el-form-item label="申请说明/备注">
           <el-input v-model="submitForm.feedback" type="textarea" :rows="2" placeholder="实验安排或特殊要求" />
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showSubmitDialog = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="handleSubmitRequest">提交申请</el-button>
+        <el-button type="primary" :loading="submitting" @click="handleSubmitRequest">{{ editingRequestId == null ? '提交申请' : '保存修改' }}</el-button>
       </template>
     </el-dialog>
 
@@ -390,6 +415,7 @@
         <div class="bg-gray-50 p-3 rounded-lg text-xs mb-4 text-gray-700">
           <div>需求者：<b>{{ currentReq?.demander }}</b> (申请品系: <b>{{ currentReq?.strain }}</b>)</div>
           <div>要求：{{ currentReq?.age_gender_req }} | 转入鼠房: {{ currentReq?.target_room }}</div>
+          <div>申请数量：{{ currentReq?.cage_count || 1 }} 笼 | 小鼠数量：{{ currentReq?.requested_mouse_count == null ? '未填写' : `${currentReq.requested_mouse_count} 只` }}</div>
         </div>
 
         <el-form-item label="审核处理状态" required>
@@ -604,6 +630,7 @@ const columnMeta = {
   age_gender_req: { label: '要求年龄/性别', ascText: '周龄小到大', descText: '周龄大到小' },
   target_room: { label: '期望转入鼠房', ascText: '名称升序', descText: '名称降序' },
   cage_count: { label: '笼位', ascText: '从少到多', descText: '从多到少' },
+  requested_mouse_count: { label: '申请只数', ascText: '从少到多', descText: '从多到少' },
   source_room: { label: '转出鼠房', ascText: '名称升序', descText: '名称降序' },
   status: { label: '状态', ascText: '流转阶段', descText: '逆流转阶段' }
 }
@@ -664,6 +691,8 @@ const sortedRequests = computed(() => {
       key = item.strain || ''
     } else if (prop === 'cage_count') {
       key = Number(item.cage_count) || 1
+    } else if (prop === 'requested_mouse_count') {
+      key = item.requested_mouse_count
     } else if (prop === 'source_room') {
       key = item.source_room || ''
     } else if (prop === 'status') {
@@ -678,7 +707,13 @@ const sortedRequests = computed(() => {
   // Fast key comparisons
   mapped.sort((a, b) => {
     let cmp = 0
-    if (prop === 'seq' || prop === 'cage_count' || prop === 'status') {
+    if (prop === 'requested_mouse_count') {
+      // 未填写的申请始终排在末尾。
+      if (a.key == null && b.key == null) return 0
+      if (a.key == null) return 1
+      if (b.key == null) return -1
+      cmp = a.key - b.key
+    } else if (prop === 'seq' || prop === 'cage_count' || prop === 'status') {
       cmp = a.key - b.key
     } else if (prop === 'request_date') {
       if (!a.key && !b.key) cmp = 0
@@ -729,6 +764,7 @@ const filters = reactive({
 
 // Submit Dialog
 const showSubmitDialog = ref(false)
+const editingRequestId = ref(null)
 const submitFormRef = ref(null)
 const submitting = ref(false)
 const submitForm = reactive({
@@ -737,13 +773,15 @@ const submitForm = reactive({
   age_gender_req: '成年/无要求',
   target_room: '东五',
   cage_count: 1,
+  requested_mouse_count: null,
   feedback: ''
 })
 
 const submitRules = {
   demander: [{ required: true, whitespace: true, message: '请选择或输入需求者姓名', trigger: 'change' }],
   strain: [{ required: true, message: '请输入小鼠品系', trigger: 'blur' }],
-  target_room: [{ required: true, whitespace: true, message: '请选择或输入期望转入鼠房', trigger: 'change' }]
+  target_room: [{ required: true, whitespace: true, message: '请选择或输入期望转入鼠房', trigger: 'change' }],
+  requested_mouse_count: [{ type: 'integer', min: 1, message: '申请小鼠数量须为正整数', trigger: 'change' }]
 }
 
 const showTransferRoomSettings = ref(false)
@@ -1076,12 +1114,14 @@ async function loadClaimerOptions() {
 }
 
 function openSubmitDialog() {
+  editingRequestId.value = null
   Object.assign(submitForm, {
     demander: '', // 默认姓名为空，由需求者自己填写
     strain: '',
     age_gender_req: '成年/无要求',
     target_room: transferRoomOptions.value[0] || '',
     cage_count: 1,
+    requested_mouse_count: null,
     feedback: ''
   })
   if (submitFormRef.value) {
@@ -1091,20 +1131,47 @@ function openSubmitDialog() {
   loadClaimerOptions()
 }
 
+function canEditApplication(row) {
+  return row.status === '申请中' && (
+    authStore.isAdmin || (row.created_by_username && row.created_by_username === authStore.user?.username)
+  )
+}
+
+function openEditDialog(row) {
+  editingRequestId.value = row.id
+  Object.assign(submitForm, {
+    demander: row.demander || '',
+    strain: row.strain || '',
+    age_gender_req: row.age_gender_req || '',
+    target_room: row.target_room || '',
+    cage_count: row.cage_count || 1,
+    requested_mouse_count: row.requested_mouse_count ?? null,
+    feedback: row.feedback || ''
+  })
+  submitFormRef.value?.clearValidate()
+  showSubmitDialog.value = true
+  loadClaimerOptions()
+}
+
 async function handleSubmitRequest() {
-  if (!submitFormRef.value) return
+  if (!submitFormRef.value || submitting.value) return
   await submitFormRef.value.validate(async (valid) => {
     if (!valid) return
     submitting.value = true
     try {
       const roomResult = await settingsApi.addTransferRoom({ name: submitForm.target_room.trim() })
       applyTransferRoomOptions(roomResult.transfer_rooms)
-      await transferRequestsApi.createRequest(submitForm)
-      ElMessage.success('转鼠需求已成功提交，请等待管理员处理！')
+      if (editingRequestId.value == null) {
+        await transferRequestsApi.createRequest(submitForm)
+        ElMessage.success('转鼠需求已成功提交，请等待管理员处理！')
+      } else {
+        await transferRequestsApi.editRequest(editingRequestId.value, submitForm)
+        ElMessage.success('申请修改已保存')
+      }
       showSubmitDialog.value = false
       loadRequests()
     } catch (e) {
-      ElMessage.error(e.response?.data?.detail || '提交失败')
+      ElMessage.error(e.response?.data?.detail || (editingRequestId.value == null ? '提交失败' : '保存失败'))
     } finally {
       submitting.value = false
     }

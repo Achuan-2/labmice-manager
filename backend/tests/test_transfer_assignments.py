@@ -21,7 +21,7 @@ class TransferAssignmentTests(unittest.TestCase):
 
         Base.metadata.create_all(self.engine)
         self.db = Session(self.engine, autoflush=False)
-        self.admin = User(username="test", display_name="管理员")
+        self.admin = User(username="test", display_name="管理员", role="admin")
         self.cages = [Cage(room="鼠房甲", cage_code="A1"), Cage(room="鼠房乙", cage_code="A1")]
         self.db.add_all(self.cages)
         self.db.flush()

@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 
 # --- Auth & User ---
@@ -322,6 +322,7 @@ class TransferRequestBase(BaseModel):
     age_gender_req: Optional[str] = "成年/无要求"
     target_room: Optional[str] = "东五"
     cage_count: Optional[int] = 1
+    requested_mouse_count: Optional[int] = Field(default=None, ge=1, strict=True)
     source_room: Optional[str] = None
     mouse_gender: Optional[str] = None
     mouse_codes: Optional[str] = None
@@ -331,6 +332,18 @@ class TransferRequestBase(BaseModel):
 class TransferRequestCreate(TransferRequestBase):
     pass
 
+class TransferRequestEdit(BaseModel):
+    """Application fields editable before the administrator starts processing."""
+    model_config = {"extra": "forbid"}
+
+    demander: str = Field(min_length=1, max_length=64)
+    strain: str = Field(min_length=1, max_length=128)
+    age_gender_req: Optional[str] = Field(default=None, max_length=128)
+    target_room: str = Field(min_length=1, max_length=64)
+    cage_count: int = Field(default=1, ge=1, le=10, strict=True)
+    requested_mouse_count: Optional[int] = Field(default=None, ge=1, strict=True)
+    feedback: Optional[str] = None
+
 class TransferRequestUpdate(BaseModel):
     demander: Optional[str] = None
     strain: Optional[str] = None
@@ -338,6 +351,7 @@ class TransferRequestUpdate(BaseModel):
     age_gender_req: Optional[str] = None
     target_room: Optional[str] = None
     cage_count: Optional[int] = None
+    requested_mouse_count: Optional[int] = Field(default=None, ge=1, strict=True)
     source_room: Optional[str] = None
     mouse_gender: Optional[str] = None
     mouse_codes: Optional[str] = None
@@ -347,6 +361,7 @@ class TransferRequestUpdate(BaseModel):
 
 class TransferRequestResponse(TransferRequestBase):
     id: int
+    created_by_username: Optional[str] = None
     seq: Optional[str] = None
     handler: Optional[str] = None
     created_at: Optional[datetime] = None
