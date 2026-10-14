@@ -1,8 +1,8 @@
 import datetime
-from typing import List, Optional
+from typing import Annotated, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import case, func, or_
 
 from backend.app.database import get_db
 from backend.app.models.models import GenotypeRecord, Mouse, User
@@ -11,8 +11,6 @@ from backend.app.schemas.schemas import (
 )
 from backend.app.auth import require_auth, require_admin
 from backend.app.services.genotype_service import sync_mouse_genotype_summary as _sync_mouse_genotype_summary
-
-from sqlalchemy import or_, case
 
 router = APIRouter(prefix="/api/genotypes", tags=["Genotypes"])
 
@@ -25,6 +23,9 @@ def list_genotypes(
     mouse_code: Optional[str] = None,
     strain: Optional[str] = None,
     genotype_1: Optional[str] = None,
+    genotype_1_values: Annotated[Optional[List[str]], Query()] = None,
+    genotype_2_values: Annotated[Optional[List[str]], Query()] = None,
+    genotype_3_values: Annotated[Optional[List[str]], Query()] = None,
     parents: Optional[str] = None,
     limit: int = Query(200, ge=1, le=1000),
     db: Session = Depends(get_db),
@@ -40,6 +41,7 @@ def list_genotypes(
                 GenotypeRecord.parents.ilike(k),
                 GenotypeRecord.genotype_1.ilike(k),
                 GenotypeRecord.genotype_2.ilike(k),
+                GenotypeRecord.genotype_3.ilike(k),
                 GenotypeRecord.notes.ilike(k)
             )
         )
@@ -49,6 +51,15 @@ def list_genotypes(
         query = query.filter(GenotypeRecord.strain == strain)
     if genotype_1:
         query = query.filter(GenotypeRecord.genotype_1 == genotype_1)
+    # Match any selected value within a column, and require all selected columns.
+    # Empty selection values include NULL and blank records shown as “未填写”.
+    for column, values in (
+        (GenotypeRecord.genotype_1, genotype_1_values),
+        (GenotypeRecord.genotype_2, genotype_2_values),
+        (GenotypeRecord.genotype_3, genotype_3_values),
+    ):
+        if values:
+            query = query.filter(func.coalesce(func.trim(column), "").in_([value.strip() for value in values]))
     if parents:
         query = query.filter(GenotypeRecord.parents.ilike(f"%{parents.strip()}%"))
 
@@ -66,6 +77,7 @@ def list_genotypes(
                     GenotypeRecord.strain.ilike(k),
                     GenotypeRecord.genotype_1.ilike(k),
                     GenotypeRecord.genotype_2.ilike(k),
+                    GenotypeRecord.genotype_3.ilike(k),
                     GenotypeRecord.notes.ilike(k),
                 ),
                 4
@@ -134,6 +146,20 @@ def list_genotypes(
             "created_at": gt.created_at
         })
     return result_items
+
+@router.get("/filter-options")
+def get_genotype_filter_options(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Return distinct values from all records, independently of pagination."""
+    options = {}
+    for field in ("genotype_1", "genotype_2", "genotype_3"):
+        value = func.coalesce(func.trim(getattr(GenotypeRecord, field)), "")
+        rows = db.query(value).distinct().order_by(value).all()
+        options[field] = [row[0] for row in rows]
+    return options
+
 
 @router.get("/by-mouse/{mouse_code}", response_model=List[GenotypeRecordResponse])
 def get_genotypes_by_mouse(

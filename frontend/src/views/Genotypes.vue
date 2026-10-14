@@ -15,18 +15,11 @@
           clearable
           prefix-icon="Search"
           style="width: 240px"
-          @keyup.enter="loadGenotypes"
+          @keyup.enter="searchGenotypes"
+          @clear="searchGenotypes"
         />
 
-        <el-input
-          v-model="filters.genotype_1"
-          placeholder="按鉴定结果筛选 (如 阳性, HET)"
-          clearable
-          style="width: 200px"
-          @keyup.enter="loadGenotypes"
-        />
-
-        <el-button type="primary" @click="loadGenotypes">查询</el-button>
+        <el-button type="primary" @click="searchGenotypes">查询</el-button>
 
         <el-button v-if="authStore.isAdmin" type="success" plain @click="openAddDialog">
           <el-icon class="mr-1"><Plus /></el-icon> 录入鉴定结果
@@ -83,7 +76,16 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="genotype_1" label="Genotype 1" width="130">
+        <el-table-column prop="genotype_1" label="Genotype 1" width="150">
+          <template #header>
+            <GenotypeFilterHeader
+              label="Genotype 1"
+              :model-value="filters.genotype_1"
+              :options="existingGenotypeOptions.genotype_1"
+              :loading="optionsLoading"
+              @update:model-value="values => updateGenotypeFilter('genotype_1', values)"
+            />
+          </template>
           <template #default="{ row }">
             <el-tag
               v-if="row.genotype_1"
@@ -96,14 +98,32 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="genotype_2" label="Genotype 2" width="130">
+        <el-table-column prop="genotype_2" label="Genotype 2" width="150">
+          <template #header>
+            <GenotypeFilterHeader
+              label="Genotype 2"
+              :model-value="filters.genotype_2"
+              :options="existingGenotypeOptions.genotype_2"
+              :loading="optionsLoading"
+              @update:model-value="values => updateGenotypeFilter('genotype_2', values)"
+            />
+          </template>
           <template #default="{ row }">
             <el-tag v-if="row.genotype_2" size="small" type="warning">{{ row.genotype_2 }}</el-tag>
             <span v-else class="text-gray-300 text-xs">-</span>
           </template>
         </el-table-column>
 
-        <el-table-column prop="genotype_3" label="Genotype 3" width="130">
+        <el-table-column prop="genotype_3" label="Genotype 3" width="150">
+          <template #header>
+            <GenotypeFilterHeader
+              label="Genotype 3"
+              :model-value="filters.genotype_3"
+              :options="existingGenotypeOptions.genotype_3"
+              :loading="optionsLoading"
+              @update:model-value="values => updateGenotypeFilter('genotype_3', values)"
+            />
+          </template>
           <template #default="{ row }">
             <el-tag v-if="row.genotype_3" size="small" type="info">{{ row.genotype_3 }}</el-tag>
             <span v-else class="text-gray-300 text-xs">-</span>
@@ -145,8 +165,7 @@
           :total="total"
           :page-sizes="[20, 50, 100, 200]"
           layout="total, sizes, prev, pager, next, jumper"
-          @size-change="loadGenotypes"
-          @current-change="loadGenotypes"
+          @size-change="page = 1"
         />
       </div>
     </div>
@@ -234,6 +253,7 @@ import { genotypesApi, miceApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import MouseDetailModal from '@/components/MouseDetailModal.vue'
 import PedigreeTags from '@/components/PedigreeTags.vue'
+import GenotypeFilterHeader from '@/components/GenotypeFilterHeader.vue'
 import { generateSequentialMouseCodes } from '@/utils/mouseCodes'
 import { ElMessage } from 'element-plus'
 
@@ -244,11 +264,25 @@ const genotypes = ref([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(50)
+const optionsLoading = ref(false)
+const genotypeOptions = reactive({ genotype_1: [], genotype_2: [], genotype_3: [] })
+let loadRequestId = 0
 
 const filters = reactive({
   keyword: '',
-  genotype_1: ''
+  genotype_1: [],
+  genotype_2: [],
+  genotype_3: []
 })
+
+// Show values already visible in the table while the full option list loads.
+const existingGenotypeOptions = computed(() => Object.fromEntries(
+  ['genotype_1', 'genotype_2', 'genotype_3'].map(field => [field, [...new Set([
+    ...genotypeOptions[field],
+    ...genotypes.value.map(record => (record[field] || '').trim()),
+    ...filters[field]
+  ])].sort((a, b) => a.localeCompare(b, 'zh-CN'))])
+))
 
 const showDialog = ref(false)
 const isEdit = ref(false)
@@ -351,16 +385,43 @@ function openMouseDetail(rowOrCode) {
   showMouseDetailModal.value = true
 }
 
+function searchGenotypes() {
+  if (page.value === 1) loadGenotypes()
+  else page.value = 1
+}
+
+function updateGenotypeFilter(field, values) {
+  filters[field] = values
+  searchGenotypes()
+}
+
+watch([page, pageSize], loadGenotypes)
+
+async function loadGenotypeOptions() {
+  optionsLoading.value = true
+  try {
+    Object.assign(genotypeOptions, await genotypesApi.getFilterOptions())
+  } catch {
+    ElMessage.warning('鉴定结果筛选选项加载失败')
+  } finally {
+    optionsLoading.value = false
+  }
+}
+
 async function loadGenotypes() {
+  const requestId = ++loadRequestId
   loading.value = true
   try {
     const params = {
       page: page.value,
       page_size: pageSize.value,
       keyword: filters.keyword || undefined,
-      genotype_1: filters.genotype_1 || undefined
+      genotype_1_values: filters.genotype_1.length ? filters.genotype_1 : undefined,
+      genotype_2_values: filters.genotype_2.length ? filters.genotype_2 : undefined,
+      genotype_3_values: filters.genotype_3.length ? filters.genotype_3 : undefined
     }
     const res = await genotypesApi.listGenotypes(params)
+    if (requestId !== loadRequestId) return
     if (res && res.items) {
       genotypes.value = res.items
       total.value = res.total
@@ -369,9 +430,9 @@ async function loadGenotypes() {
       total.value = res.length
     }
   } catch (e) {
-    ElMessage.error('加载基因鉴定记录失败')
+    if (requestId === loadRequestId) ElMessage.error('加载基因鉴定记录失败')
   } finally {
-    loading.value = false
+    if (requestId === loadRequestId) loading.value = false
   }
 }
 
@@ -438,6 +499,7 @@ async function submitForm() {
     }
     showDialog.value = false
     loadGenotypes()
+    loadGenotypeOptions()
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || '保存失败')
   } finally {
@@ -450,6 +512,7 @@ async function handleDelete(id) {
     await genotypesApi.deleteGenotype(id)
     ElMessage.success('删除成功')
     loadGenotypes()
+    loadGenotypeOptions()
   } catch (e) {
     ElMessage.error('删除失败')
   }
@@ -457,6 +520,7 @@ async function handleDelete(id) {
 
 onMounted(() => {
   loadGenotypes()
+  loadGenotypeOptions()
   miceApi.getAllStrains().then(strains => { strainOptions.value = strains }).catch(() => {
     ElMessage.warning('品系列表加载失败，仍可自定义输入')
   })
