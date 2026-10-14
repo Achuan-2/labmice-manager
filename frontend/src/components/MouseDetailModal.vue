@@ -457,7 +457,7 @@
                       {{ log.target_room }} {{ log.target_cage }}
                     </template>
                   </span>
-                  <span v-if="log.notes" class="ml-1.5 text-gray-400 text-[11px]">({{ log.notes }})</span>
+                  <span v-if="log.notes" class="ml-1.5 text-gray-400 text-[11px]">({{ formatLogNotes(log) }})</span>
                 </div>
                 <span class="text-gray-400 text-[11px] font-mono">{{ log.date || log.created_at || '' }}</span>
               </div>
@@ -821,6 +821,12 @@ const parsedParents = computed(() => {
 
 function getStatusType(status) {
   return ALL_STATUSES.value.find(item => item.value === status)?.type || 'info'
+}
+
+function formatLogNotes(log) {
+  if (log.action_type !== '导入数据') return log.notes
+  // 导入日志首行记录文件名；档案中仅显示文件名，避免展开整份导入明细。
+  return (log.notes || '').split(/\r?\n/, 1)[0].replace(/^文件[：:]\s*/, '').trim()
 }
 
 // Traversal history stack for lineage navigation

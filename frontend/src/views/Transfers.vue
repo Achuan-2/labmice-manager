@@ -77,9 +77,9 @@
 
         <el-table-column prop="mouse_codes" label="小鼠耳标 (点击查档案)" min-width="220">
           <template #default="{ row }">
-            <div class="flex flex-wrap gap-1">
+            <div class="mouse-code-list flex flex-wrap gap-1">
               <span
-                v-for="code in splitMouseCodes(row.mouse_codes)"
+                v-for="code in (expandedMouseCodeRows.has(row.id) ? row.mouseCodeList : row.mouseCodeList.slice(0, MOUSE_CODE_PREVIEW_LIMIT))"
                 :key="code"
                 class="inline-flex items-center gap-1 cursor-pointer font-mono text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded border border-blue-200 transition-colors group"
                 title="点击查看小鼠完整档案与系谱"
@@ -88,6 +88,15 @@
                 <span>{{ code }}</span>
               </span>
             </div>
+            <el-button
+              v-if="row.mouseCodeList.length > MOUSE_CODE_PREVIEW_LIMIT"
+              link
+              type="primary"
+              size="small"
+              @click="toggleMouseCodes(row.id)"
+            >
+              {{ expandedMouseCodeRows.has(row.id) ? '收起' : `展开其余 ${row.mouseCodeList.length - MOUSE_CODE_PREVIEW_LIMIT} 只` }}
+            </el-button>
           </template>
         </el-table-column>
 
@@ -119,10 +128,10 @@
         <el-table-column prop="notes" label="备注说明" min-width="160">
           <template #default="{ row }">
             <template v-if="row.action_type === '导入数据'">
-              <div class="text-xs text-gray-500">{{ (row.notes || '').split('\n').slice(0, 2).join('；') }}</div>
+              <div class="log-notes-preview text-xs text-gray-500">{{ (row.notes || '').split(/\r?\n/, 1)[0].replace(/^文件[：:]\s*/, '').trim() }}</div>
               <el-button link type="primary" size="small" @click="selectedImportLog = row">查看导入明细</el-button>
             </template>
-            <span v-else class="text-xs text-gray-500">{{ row.notes || '-' }}</span>
+            <span v-else class="log-notes-preview text-xs text-gray-500" :title="row.notes">{{ row.notes || '-' }}</span>
           </template>
         </el-table-column>
       </el-table>
@@ -165,6 +174,8 @@ const { getClaimerTagStyle, fetchClaimerColors } = useClaimerColors()
 
 const loading = ref(false)
 const transfers = ref([])
+const MOUSE_CODE_PREVIEW_LIMIT = 8
+const expandedMouseCodeRows = ref(new Set())
 const selectedImportLog = ref(null)
 const total = ref(0)
 const page = ref(1)
@@ -185,6 +196,14 @@ function splitMouseCodes(str) {
   return str.replace(/，/g, ',').replace(/、/g, ',').split(',').map(s => s.trim()).filter(Boolean)
 }
 
+function toggleMouseCodes(id) {
+  if (expandedMouseCodeRows.value.has(id)) {
+    expandedMouseCodeRows.value.delete(id)
+  } else {
+    expandedMouseCodeRows.value.add(id)
+  }
+}
+
 const filters = reactive({
   claimer_name: '',
   action_type: ''
@@ -202,7 +221,11 @@ async function loadTransfers() {
     }
     const result = await transfersApi.listTransfers(params)
     if (requestId !== loadRequestId) return
-    transfers.value = result.items
+    transfers.value = result.items.map(row => ({
+      ...row,
+      mouseCodeList: splitMouseCodes(row.mouse_codes)
+    }))
+    expandedMouseCodeRows.value.clear()
     total.value = result.total
   } catch (e) {
     if (requestId === loadRequestId) ElMessage.error('加载变动日志失败')
@@ -226,3 +249,18 @@ onMounted(() => {
   loadTransfers()
 })
 </script>
+
+<style scoped>
+.mouse-code-list {
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.log-notes-preview {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+</style>
