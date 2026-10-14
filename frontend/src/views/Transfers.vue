@@ -100,16 +100,20 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="位置变化" min-width="180">
+        <el-table-column label="位置变化" min-width="280">
           <template #default="{ row }">
             <span v-if="row.action_type === '导入数据'" class="text-gray-400 text-xs">详见导入明细</span>
             <div v-else class="text-xs flex items-center gap-1">
-              <span class="text-gray-500">{{ row.source_room || (row.action_type === '新增小鼠' ? '新增' : '未记录鼠房') }}</span>
-              <span v-if="row.source_cage" class="text-amber-600 font-mono font-bold">({{ row.source_cage }})</span>
+              <div class="transfer-location">
+                <span class="text-gray-500">{{ row.source_room || (row.action_type === '新增小鼠' ? '新增' : '未记录鼠房') }}</span>
+                <span v-if="row.source_cage" class="text-amber-600 font-mono font-bold">({{ row.source_cage }})</span>
+              </div>
               <template v-if="row.target_room || row.target_cage">
                 <span class="text-gray-400">→</span>
-                <span class="font-bold text-gray-700">{{ row.target_room || '未记录鼠房' }}</span>
-                <span v-if="row.target_cage" class="text-amber-600 font-mono font-bold">({{ row.target_cage }})</span>
+                <div class="transfer-location">
+                  <span class="font-bold text-gray-700">{{ row.target_room || '未记录鼠房' }}</span>
+                  <span v-if="row.target_cage" class="text-amber-600 font-mono font-bold">({{ row.target_cage }})</span>
+                </div>
               </template>
             </div>
           </template>
@@ -251,6 +255,13 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.transfer-location {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .mouse-code-list {
   max-height: 180px;
   overflow-y: auto;
