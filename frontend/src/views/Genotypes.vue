@@ -8,7 +8,7 @@
         </div>
       </div>
 
-      <div class="genotype-filters ml-auto flex items-center gap-3">
+      <div class="genotype-filters flex w-full items-center gap-3">
         <el-select v-model="filters.test_status" placeholder="全部鉴定状态" clearable style="width: 150px" @change="searchGenotypes">
           <el-option label="待鉴定" value="pending" />
           <el-option label="已鉴定" value="tested" />
@@ -25,9 +25,6 @@
 
         <el-button type="primary" @click="searchGenotypes">查询</el-button>
 
-        <el-button v-if="authStore.isAdmin" type="primary" plain @click="openAddDialog">
-          <el-icon class="mr-1"><Plus /></el-icon> 录入鉴定结果
-        </el-button>
         <div class="ml-auto flex items-center gap-2" role="group" aria-label="基因鉴定结果排序">
           <el-icon class="shrink-0 text-gray-500" :size="16" aria-hidden="true"><Sort /></el-icon>
           <el-select v-model="sortBy" size="small" style="width: 140px" aria-label="排序方式" @change="searchGenotypes">
@@ -38,6 +35,9 @@
             <el-option label="降序" value="desc" />
           </el-select>
         </div>
+        <el-button v-if="authStore.isAdmin" type="primary" plain @click="openAddDialog">
+          <el-icon class="mr-1"><Plus /></el-icon> 录入鉴定结果
+        </el-button>
       </div>
     </div>
 
