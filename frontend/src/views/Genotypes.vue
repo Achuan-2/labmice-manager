@@ -26,7 +26,7 @@
         <el-button type="primary" @click="searchGenotypes">查询</el-button>
 
         <div class="ml-auto flex items-center gap-2" role="group" aria-label="基因鉴定结果排序">
-          <el-icon class="shrink-0 text-gray-500" :size="16" aria-hidden="true"><Sort /></el-icon>
+          <ArrowDownWideNarrow class="shrink-0 text-gray-500" :size="16" aria-hidden="true" />
           <el-select v-model="sortBy" size="small" style="width: 140px" aria-label="排序方式" @change="searchGenotypes">
             <el-option v-for="option in genotypeSortOptions" :key="option.value" :label="option.label" :value="option.value" />
           </el-select>
@@ -283,6 +283,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ArrowDownWideNarrow } from 'lucide-vue-next'
 import { genotypesApi, miceApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import MouseDetailModal from '@/components/MouseDetailModal.vue'
