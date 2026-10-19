@@ -119,6 +119,52 @@ class MouseSortingTests(unittest.TestCase):
         for params in ({"dob_from": "2026-02-30"}, {"dob_from": "2026-06-01", "dob_to": "2026-05-01"}):
             self.assertEqual(self.client.get("/api/mice", params=params).status_code, 422)
 
+    def set_birth_dates_by_age(self, **ages):
+        with Session(self.engine) as db:
+            for code, days in ages.items():
+                db.query(Mouse).filter_by(mouse_code=code).one().dob = (
+                    (datetime.date.today() - datetime.timedelta(days=days)).isoformat() if days is not None else None
+                )
+            db.commit()
+
+    def test_week_age_filter_is_strict_and_supports_fractional_weeks(self):
+        self.set_birth_dates_by_age(R100=56, R003=57, R020=55, R004=None)
+        self.assertEqual(self.codes(age_weeks_gt=8), ["R003"])
+        self.assertEqual(self.codes(age_weeks_lt=8), ["R020"])
+        self.assertEqual(self.codes(age_weeks_gt=7.9, age_weeks_lt=8.1), ["R100"])
+        self.assertEqual(self.codes(age_weeks_gt=8.1), ["R003"])
+        self.assertEqual(self.codes(age_weeks_lt=7.9), ["R020"])
+
+    def test_week_age_filters_combine_with_dates_and_apply_before_pagination(self):
+        self.set_birth_dates_by_age(R100=56, R003=70, R020=84, R004=None)
+        self.assertEqual(self.codes(age_weeks_gt=7, age_weeks_lt=13, strain="B"), ["R020", "R100"])
+        cutoff = (datetime.date.today() - datetime.timedelta(days=63)).isoformat()
+        self.assertEqual(self.codes(age_weeks_gt=7, dob_from=cutoff), ["R100"])
+        result = self.listing(age_weeks_gt=7, sort_by="dob", sort_order="asc", page_size=1, page=2)
+        self.assertEqual(result["total"], 3)
+        self.assertEqual([row["mouse_code"] for row in result["items"]], ["R003"])
+
+    def test_week_age_filter_handles_zero_future_and_invalid_birth_dates(self):
+        self.set_birth_dates_by_age(R100=0, R003=-7, R020=1, R004=None)
+        self.assertEqual(self.codes(age_weeks_gt=0), ["R020"])
+        self.assertEqual(set(self.codes(age_weeks_lt=0.1)), {"R100", "R003"})
+        self.assertEqual(self.codes(age_weeks_lt=0), [])
+        for invalid_date in ("", " ", "bad-date", "2026-02-30"):
+            with self.subTest(dob=invalid_date):
+                with Session(self.engine) as db:
+                    db.query(Mouse).filter_by(mouse_code="R004").one().dob = invalid_date
+                    db.commit()
+                self.assertNotIn("R004", self.codes(age_weeks_lt=1000))
+
+    def test_week_age_filter_rejects_invalid_limits(self):
+        for params in (
+            {"age_weeks_gt": -1}, {"age_weeks_lt": -1}, {"age_weeks_gt": "nan"},
+            {"age_weeks_lt": "inf"}, {"age_weeks_gt": "bad-value"},
+            {"age_weeks_gt": 8, "age_weeks_lt": 8}, {"age_weeks_gt": 12, "age_weeks_lt": 8},
+        ):
+            with self.subTest(params=params):
+                self.assertEqual(self.client.get("/api/mice", params=params).status_code, 422)
+
     def test_column_menus_combine_filters_before_paginating(self):
         with Session(self.engine) as db:
             mouse = db.query(Mouse).filter_by(mouse_code="R100").one()

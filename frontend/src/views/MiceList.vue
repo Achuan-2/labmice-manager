@@ -562,6 +562,8 @@ const emptyFilters = {
   in_cage: null,
   dob_from: '',
   dob_to: '',
+  age_weeks_gt: null,
+  age_weeks_lt: null,
   genotype: '',
   test_status: '',
   claim_purpose: '',
@@ -639,7 +641,12 @@ const columnControls = computed(() => {
     mouse_code: [{ key: 'mouse_code', label: '耳标编号', placeholder: '输入完整耳标编号' }],
     strain: [{ key: 'strain', label: '品系', type: 'select', options: options(strainOptions.value) }],
     gender: [{ key: 'gender', label: '性别', type: 'select', options: gridOptions.value.gender }],
-    dob: [{ key: 'dob_from', label: '出生日期起始', type: 'date' }, { key: 'dob_to', label: '出生日期截止', type: 'date' }],
+    dob: [
+      { key: 'age_weeks_gt', label: '周龄大于（周）', type: 'number' },
+      { key: 'age_weeks_lt', label: '周龄小于（周）', type: 'number' },
+      { key: 'dob_from', label: '出生日期起始', type: 'date' },
+      { key: 'dob_to', label: '出生日期截止', type: 'date' },
+    ],
     parents: [{ key: 'parents', label: '亲本编号', type: 'select', multiple: true,
       options: parentOptions.value.map(value => ({ value, label: parentOptionLabel(value) })) }],
     genotype_1: [
@@ -679,6 +686,10 @@ function columnMenuProps(field, label) {
 function columnMenuEvents(field) {
   return {
     filter: values => {
+      if (values.age_weeks_gt != null && values.age_weeks_lt != null && values.age_weeks_gt >= values.age_weeks_lt) {
+        ElMessage.warning('周龄下限必须小于上限')
+        return
+      }
       if (values.dob_from && values.dob_to && values.dob_from > values.dob_to) {
         ElMessage.warning('出生日期起始不能晚于截止日期')
         return
@@ -827,6 +838,8 @@ async function loadMice() {
       in_cage: filters.in_cage,
       dob_from: filters.dob_from || undefined,
       dob_to: filters.dob_to || undefined,
+      age_weeks_gt: filters.age_weeks_gt ?? undefined,
+      age_weeks_lt: filters.age_weeks_lt ?? undefined,
       genotype: filters.genotype || undefined,
       test_status: filters.test_status || undefined,
       claim_purpose: filters.claim_purpose || undefined,

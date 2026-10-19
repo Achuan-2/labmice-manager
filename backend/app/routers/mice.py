@@ -1,6 +1,6 @@
 import re
 import datetime
-from typing import List, Literal, Optional, Dict, Any
+from typing import Annotated, List, Literal, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import or_, and_, case, func, literal
@@ -171,6 +171,8 @@ def list_mice(
     in_cage: Optional[bool] = None,
     dob_from: Optional[datetime.date] = None,
     dob_to: Optional[datetime.date] = None,
+    age_weeks_gt: Annotated[Optional[float], Query(ge=0, allow_inf_nan=False)] = None,
+    age_weeks_lt: Annotated[Optional[float], Query(ge=0, allow_inf_nan=False)] = None,
     genotype: Optional[str] = None,
     test_status: Optional[Literal["pending", "tested"]] = None,
     claim_purpose: Optional[str] = None,
@@ -185,6 +187,8 @@ def list_mice(
 ):
     if dob_from and dob_to and dob_from > dob_to:
         raise HTTPException(status_code=422, detail="出生日期起始不能晚于截止日期")
+    if age_weeks_gt is not None and age_weeks_lt is not None and age_weeks_gt >= age_weeks_lt:
+        raise HTTPException(status_code=422, detail="周龄下限必须小于上限")
     query = db.query(Mouse).join(Mouse.cage, isouter=True)
 
     if mouse_code:
@@ -233,6 +237,15 @@ def list_mice(
             query = query.filter(Mouse.dob >= dob_from.isoformat())
         if dob_to:
             query = query.filter(Mouse.dob <= dob_to.isoformat())
+    if age_weeks_gt is not None or age_weeks_lt is not None:
+        # Compare the exact age in days before pagination. Unknown dates evaluate to NULL and do not match.
+        # Clamp future birth dates to zero, consistently with the age shown in the table.
+        age_days = func.max(0, func.julianday(datetime.date.today().isoformat()) - func.julianday(Mouse.dob))
+        query = query.filter(func.date(Mouse.dob, "+0 days") == Mouse.dob)
+        if age_weeks_gt is not None:
+            query = query.filter(age_days > age_weeks_gt * 7)
+        if age_weeks_lt is not None:
+            query = query.filter(age_days < age_weeks_lt * 7)
     if genotype:
         pattern = f"%{genotype.strip()}%"
         query = query.filter(or_(
