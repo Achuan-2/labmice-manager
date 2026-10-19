@@ -137,7 +137,7 @@
             type="primary"
             class="w-full"
             :loading="uploading"
-            :disabled="fileList.length === 0 || restoringOrder || !authStore.isAdmin"
+            :disabled="fileList.length === 0 || !authStore.isAdmin"
             @click="submitUpload"
           >
             <el-icon class="mr-1"><UploadFilled /></el-icon>
@@ -146,14 +146,6 @@
           <div v-if="!authStore.isAdmin" class="text-[11px] text-amber-600 mt-2 text-center">
             * 仅管理员账号可执行数据导入操作
           </div>
-          <el-button
-            class="w-full mt-3"
-            plain
-            :loading="restoringOrder"
-            :disabled="fileList.length !== 1 || uploading || restoringDatabase || !authStore.isAdmin"
-            @click="restoreGenotypeOrder"
-          >按此 Excel 恢复基因鉴定顺序</el-button>
-          <div class="text-xs text-gray-500 leading-relaxed mt-2">选择原始 .xlsx 后，可单独恢复鉴定记录的 Excel 行顺序。保留已有结果和人工修改，不新增或删除记录，恢复前自动备份。完成后在基因鉴定页选择“添加顺序：倒序”。</div>
           <div class="mt-4 pt-4 border-t border-gray-100">
             <input ref="databaseInput" type="file" accept=".db" style="display: none" aria-hidden="true" tabindex="-1" @change="selectDatabase" />
             <el-button
@@ -161,7 +153,7 @@
               plain
               class="w-full"
               :loading="restoringDatabase"
-              :disabled="!authStore.isAdmin || exportingDatabase || uploading || restoringOrder"
+              :disabled="!authStore.isAdmin || exportingDatabase || uploading"
               @click="databaseInput?.click()"
             >
               导入数据库并完整恢复 (.db)
@@ -238,28 +230,6 @@ const importResultVisible = ref(false)
 const databaseInput = ref(null)
 const exportingDatabase = ref(false)
 const restoringDatabase = ref(false)
-const restoringOrder = ref(false)
-
-async function restoreGenotypeOrder() {
-  if (restoringOrder.value || uploading.value || fileList.value.length !== 1 || !authStore.isAdmin) return
-  const file = fileList.value[0].raw || fileList.value[0]
-  if (!file.name.toLowerCase().endsWith('.xlsx')) return ElMessage.warning('恢复顺序请选择原始 .xlsx 文件')
-  restoringOrder.value = true
-  try {
-    const data = new FormData()
-    data.append('file', file)
-    const result = await importExportApi.restoreGenotypeOrder(data)
-    const unmatched = result.missing.length + result.ambiguous.length
-    await ElMessageBox.alert(
-      `${result.message}。${unmatched ? `另有 ${result.missing.length} 行无对应记录、${result.ambiguous.length} 行无法唯一匹配，已跳过。` : ''}恢复前备份：data/backups/${result.safety_backup}。请到基因鉴定页选择“添加顺序：倒序”查看。`,
-      '顺序恢复完成', { confirmButtonText: '知道了' }
-    )
-  } catch (error) {
-    ElMessage.error(error.response?.data?.detail || '恢复顺序失败')
-  } finally {
-    restoringOrder.value = false
-  }
-}
 
 async function exportDatabase() {
   if (exportingDatabase.value || restoringDatabase.value || !authStore.isAdmin) return
@@ -310,7 +280,7 @@ function clearAllFiles() {
 }
 
 async function submitUpload() {
-  if (uploading.value || restoringOrder.value) return
+  if (uploading.value) return
   if (!authStore.isAdmin) {
     ElMessage.error('仅管理员可执行导入操作')
     return
