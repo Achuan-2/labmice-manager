@@ -107,9 +107,9 @@
             >
               <span v-if="column.field === 'strain'" class="font-semibold text-blue-700">{{ row.strain || '-' }}</span>
               <template v-else-if="column.field === 'gender'">
-                <span v-if="row.gender === 'M'" class="text-blue-500 font-bold">♂ 雄</span>
-                <span v-else-if="row.gender === 'F'" class="text-pink-500 font-bold">♀ 雌</span>
-                <span v-else class="text-gray-400 text-xs">{{ row.gender || '-' }}</span>
+                <el-tag v-if="row.gender === 'M'" size="small" type="primary">♂ 雄</el-tag>
+                <el-tag v-else-if="row.gender === 'F'" size="small" type="danger">♀ 雌</el-tag>
+                <el-tag v-else size="small" type="info">未知</el-tag>
               </template>
               <PedigreeTags v-else :parents="row.parents" @click-parent="openMouseDetail" />
             </GenotypeGridCell>
