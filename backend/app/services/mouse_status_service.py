@@ -119,7 +119,15 @@ def apply_mouse_status(db: Session, mouse: Mouse, name: str) -> str:
     status = ensure_mouse_status(db, name)
     if status.name == "已领用" and mouse.cage_id is None:
         status = ensure_mouse_status(db, "出笼")
+    if status.name == "待鉴定":
+        if mouse.status != "待鉴定":
+            mouse.status_before_genotyping = mouse.status
+    else:
+        mouse.status_before_genotyping = None
     mouse.status = status.name
     if status.removes_from_cage:
         mouse.cage_id = None
+    if status.name == "待鉴定":
+        from backend.app.services.genotype_service import ensure_pending_genotype_record
+        ensure_pending_genotype_record(mouse, db)
     return status.name

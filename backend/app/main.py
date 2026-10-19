@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from backend.app.database import (
     SessionLocal, BASE_DIR, create_business_tables,
     migrate_room_category, migrate_todo_fields, migrate_transfer_request_fields,
-    migrate_genotype_entry_order,
+    migrate_genotype_entry_order, migrate_mouse_genotyping_status,
 )
 from backend.app.auth_database import AuthSessionLocal, initialize_auth_database
 from backend.app.models.models import Mouse, User, SystemSetting, Claimer, Room
@@ -42,6 +42,7 @@ from backend.app.services.mouse_status_service import sync_mouse_statuses
 from backend.app.services.owner_service import sync_euthanasia_owner
 from backend.app.services.settings_service import get_public_settings
 from backend.app.services.transfer_request_service import backfill_request_creators
+from backend.app.services.genotype_service import sync_existing_genotyping_statuses
 
 # Create database tables
 create_business_tables()
@@ -50,6 +51,7 @@ migrate_room_category()
 migrate_todo_fields()
 migrate_transfer_request_fields()
 migrate_genotype_entry_order()
+migrate_mouse_genotyping_status()
 
 app = FastAPI(
     title="课题组小鼠管理系统",
@@ -103,6 +105,7 @@ def startup_event():
         sync_and_normalize_all_strains(db)
         sync_mouse_statuses(db)
         sync_euthanasia_owner(db)
+        sync_existing_genotyping_statuses(db)
         db.query(Room).filter(Room.category == "使用鼠房").update(
             {"category": "实验鼠房"}, synchronize_session=False
         )

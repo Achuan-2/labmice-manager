@@ -1,5 +1,6 @@
 """Shared genotype history and mouse-summary behavior."""
 
+import datetime
 from typing import Optional
 
 from sqlalchemy import func, or_
@@ -107,3 +108,90 @@ def sync_mouse_genotype_summary(
         ):
             continue
         setattr(mouse, field, value)
+    # Excel reimports must preserve manually edited lifecycle states.
+    if not preserve_empty_values:
+        sync_mouse_genotyping_status(mouse, db)
+
+
+def latest_pending_mouse_genotype(mouse: Mouse, db: Session):
+    query = db.query(GenotypeRecord).filter(or_(
+        GenotypeRecord.mouse_id == mouse.id,
+        GenotypeRecord.mouse_code == mouse.mouse_code,
+    ))
+    return query.filter(~genotype_result_condition()).order_by(
+        func.coalesce(GenotypeRecord.entry_order, GenotypeRecord.id).desc(),
+        GenotypeRecord.id.desc(),
+    ).first()
+
+
+def ensure_pending_genotype_record(mouse: Mouse, db: Session):
+    """A manual pending status starts a test without duplicating an open record."""
+    db.flush()
+    latest = latest_pending_mouse_genotype(mouse, db)
+    if latest:
+        return latest
+    record = GenotypeRecord(
+        mouse_id=mouse.id, mouse_code=mouse.mouse_code,
+        entry_order=next_genotype_entry_order(db),
+        strain=mouse.strain, dob=mouse.dob, gender=mouse.gender, parents=mouse.parents,
+    )
+    db.add(record)
+    db.flush()
+    return record
+
+
+def sync_mouse_genotyping_status(mouse: Optional[Mouse], db: Session):
+    """Link the current test to status without discarding historical results."""
+    if not mouse:
+        return
+    if mouse.status == "死亡" or mouse.owner_name == "安乐死":
+        mouse.status_before_genotyping = None
+        return
+    pending = latest_pending_mouse_genotype(mouse, db)
+    if pending:
+        if mouse.status != "待鉴定":
+            from backend.app.services.mouse_status_service import ensure_mouse_status
+            ensure_mouse_status(db, "待鉴定")
+            mouse.status_before_genotyping = mouse.status
+            mouse.status = "待鉴定"
+    else:
+        if mouse.status == "待鉴定":
+            previous = mouse.status_before_genotyping
+            if previous not in (None, "待鉴定", "在笼", "已领用", "出笼"):
+                mouse.status = previous
+            else:
+                mouse.status = ("已领用" if mouse.owner_id or mouse.owner_name else "在笼") if mouse.cage_id else "出笼"
+        mouse.status_before_genotyping = None
+
+
+def update_pending_genotype_from_mouse(mouse: Mouse, db: Session, values: dict):
+    """Complete an open test when its results are edited from the mouse archive."""
+    if not values:
+        return
+    db.flush()
+    latest = latest_pending_mouse_genotype(mouse, db)
+    if not latest:
+        return
+    for field, value in values.items():
+        setattr(latest, field, normalize_genotype_value(value))
+    is_tested = has_genotype_result(latest.genotype_1, latest.genotype_2, latest.genotype_3)
+    if is_tested and not latest.test_date:
+        latest.test_date = datetime.date.today().isoformat()
+    db.flush()
+    if is_tested:
+        sync_mouse_genotype_summary(mouse, db)
+    else:
+        sync_mouse_genotyping_status(mouse, db)
+
+
+def sync_existing_genotyping_statuses(db: Session):
+    """Backfill legacy pending flags and records idempotently during startup."""
+    mice = db.query(Mouse).filter(or_(
+        Mouse.status == "待鉴定",
+        Mouse.genotype_records.any(),
+        Mouse.mouse_code.in_(db.query(GenotypeRecord.mouse_code)),
+    )).all()
+    for mouse in mice:
+        if mouse.status == "待鉴定":
+            ensure_pending_genotype_record(mouse, db)
+        sync_mouse_genotyping_status(mouse, db)

@@ -18,6 +18,7 @@ from backend.app.models.models import Mouse, Cage, Claimer, TransferLog, Primer,
 from backend.app.services.importer import import_local_excel_folder, import_single_excel_file
 from backend.app.services.genotype_order import apply_genotype_order, plan_genotype_order
 from backend.app.services.owner_service import sync_euthanasia_owner
+from backend.app.services.genotype_service import sync_existing_genotyping_statuses
 from backend.app.services.strain_service import normalize_strain_name
 from backend.app.auth import require_admin, require_auth
 
@@ -93,6 +94,7 @@ def import_database(file: UploadFile = File(...), db: Session = Depends(get_db),
             restore_database(path, DB_PATH, safety, get_business_tables(), engine)
             with Session(engine) as restored_db:
                 sync_euthanasia_owner(restored_db)
+                sync_existing_genotyping_statuses(restored_db)
                 restored_db.commit()
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

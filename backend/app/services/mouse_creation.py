@@ -12,6 +12,7 @@ from backend.app.services.mouse_status_service import ensure_mouse_status
 from backend.app.services.owner_service import is_euthanasia_owner
 from backend.app.services.pedigree_service import normalize_parents_pedigree
 from backend.app.services.strain_service import normalize_strain_name
+from backend.app.services.genotype_service import ensure_pending_genotype_record
 
 
 def next_available_mouse_code(db: Session, requested_code: str, occupied_codes: Optional[set[str]] = None) -> str:
@@ -122,6 +123,8 @@ def create_mouse_in_session(
         GenotypeRecord.mouse_code == mouse.mouse_code,
         GenotypeRecord.mouse_id.is_(None),
     ).update({"mouse_id": mouse.id}, synchronize_session="fetch")
+    if mouse.status == "待鉴定":
+        ensure_pending_genotype_record(mouse, db)
     target_cage = db.get(Cage, mouse.cage_id) if mouse.cage_id else None
     record_mouse_creation(
         db, [mouse.mouse_code], mouse.owner_name,

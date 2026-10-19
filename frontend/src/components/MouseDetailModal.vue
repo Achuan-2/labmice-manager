@@ -409,7 +409,8 @@
                 <div class="flex items-center justify-between">
                   <span class="font-mono text-gray-600 font-medium">📅 鉴定日期: {{ gt.test_date || '未记录' }}</span>
                   <div class="flex gap-1">
-                    <el-tag size="small" :type="hasGenotypeResult(gt) ? 'success' : 'warning'">{{ gt.genotype_1 || (hasGenotypeResult(gt) ? '已有结果' : '待检验') }}</el-tag>
+                    <el-tag size="small" :type="hasGenotypeResult(gt) ? 'success' : 'warning'">{{ hasGenotypeResult(gt) ? '已鉴定' : '待鉴定' }}</el-tag>
+                    <el-tag v-if="hasGenotypeResult({ genotype_1: gt.genotype_1 })" size="small" type="success">{{ gt.genotype_1 }}</el-tag>
                     <el-tag v-if="gt.genotype_2" size="small" type="warning">{{ gt.genotype_2 }}</el-tag>
                     <el-tag v-if="gt.genotype_3" size="small" type="info">{{ gt.genotype_3 }}</el-tag>
                   </div>

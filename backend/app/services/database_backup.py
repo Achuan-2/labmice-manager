@@ -62,7 +62,10 @@ def validate_database(path, tables):
                 if table.name not in existing_tables:
                     raise ValueError(f'数据库缺少数据表：{table.name}，请使用当前版本导出的备份')
                 columns = {row[1] for row in db.execute(f'PRAGMA table_info("{table.name}")')}
-                optional_columns = {'entry_order'} if table.name == 'genotype_records' else set()
+                optional_columns = {
+                    'genotype_records': {'entry_order'},
+                    'mice': {'status_before_genotyping'},
+                }.get(table.name, set())
                 if not {column.name for column in table.columns if column.name not in optional_columns}.issubset(columns):
                     raise ValueError(f'数据表 {table.name} 版本不兼容，请使用当前版本导出的备份')
             if db.execute('PRAGMA foreign_key_check').fetchone():
@@ -79,6 +82,7 @@ def restore_database(source, target, safety_backup, tables, engine):
     # identity and avoiding unsafe replacement of an open WAL database file.
     snapshot(source, target)
     # Backups from before order recovery remain restorable.
-    from backend.app.database import migrate_genotype_entry_order
+    from backend.app.database import migrate_genotype_entry_order, migrate_mouse_genotyping_status
     migrate_genotype_entry_order(engine)
+    migrate_mouse_genotyping_status(engine)
     engine.dispose()

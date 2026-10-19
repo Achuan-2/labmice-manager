@@ -13,3 +13,10 @@ export function hasGenotypeResult(record) {
     field => !pendingGenotypeValues.has(String(record?.[field] ?? '').trim())
   )
 }
+
+export function mouseGenotypeLabel(mouse) {
+  if (mouse?.status === '待鉴定') return '待鉴定'
+  const result = mouse?.genotypes?.find(hasGenotypeResult) || mouse
+  if (!hasGenotypeResult(result)) return '待鉴定'
+  return hasGenotypeResult({ genotype_1: result.genotype_1 }) ? result.genotype_1 : '已鉴定'
+}

@@ -13,8 +13,8 @@
           <el-option v-for="option in genotypeSortOptions" :key="option.value" :label="option.label" :value="option.value" />
         </el-select>
         <el-select v-model="filters.test_status" placeholder="全部鉴定状态" clearable style="width: 150px" @change="searchGenotypes">
-          <el-option label="待检验" value="pending" />
-          <el-option label="已有结果" value="tested" />
+          <el-option label="待鉴定" value="pending" />
+          <el-option label="已鉴定" value="tested" />
         </el-select>
         <el-input
           v-model="filters.keyword"
@@ -42,7 +42,7 @@
       <el-table v-loading="loading || gridSaving" :data="genotypes" row-key="id" stripe style="width: 100%">
         <el-table-column label="鉴定状态" width="100">
           <template #default="{ row }">
-            <el-tag size="small" :type="hasGenotypeResult(row) ? 'success' : 'warning'">{{ hasGenotypeResult(row) ? '已有结果' : '待检验' }}</el-tag>
+            <el-tag size="small" :type="hasGenotypeResult(row) ? 'success' : 'warning'">{{ hasGenotypeResult(row) ? '已鉴定' : '待鉴定' }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="dob" label="出生日期" width="110">
@@ -160,7 +160,7 @@
 
     <!-- Add/Edit Genotype Dialog -->
     <el-dialog v-model="showDialog" class="genotype-entry-dialog" :title="isEdit ? '编辑基因鉴定记录' : '录入鉴定结果'" width="540px" align-center>
-      <div v-if="!isEdit" class="text-xs text-gray-500 mb-4">新编号会同步创建小鼠档案并记录变动日志。基因型结果和鉴定日期均可留空；结果留空时保存为待检验。</div>
+      <div v-if="!isEdit" class="text-xs text-gray-500 mb-4">新编号会同步创建小鼠档案并记录变动日志。基因型结果和鉴定日期均可留空；结果留空时保存为待鉴定。</div>
       <el-form :model="form" label-width="110px" class="genotype-form" :disabled="saving">
         <template v-if="!isEdit">
           <el-form-item label="录入方式">
@@ -210,7 +210,7 @@
             <el-table-column prop="mouse_code" label="耳标编号" min-width="90" />
             <el-table-column label="鉴定状态" width="90">
               <template #default="{ row }">
-                <el-tag size="small" :type="row.tested ? 'success' : 'warning'">{{ row.tested ? '已鉴定' : '未鉴定' }}</el-tag>
+                <el-tag size="small" :type="row.tested ? 'success' : 'warning'">{{ row.tested ? '已鉴定' : '待鉴定' }}</el-tag>
               </template>
             </el-table-column>
             <el-table-column prop="test_date" label="鉴定日期" min-width="105">
@@ -344,7 +344,7 @@ const existingEntries = computed(() => entryChecks.value.filter(entry => entry.m
 const entryWarning = computed(() => {
   if (createNewMouse.value && existingEntries.value.length) return '以下编号已存在，新增小鼠时将自动更名'
   if (testedEntries.value.length) return '已有鉴定信息，保存需确认再次登记。'
-  if (pendingEntries.value.length) return '已有待检验记录，保存需确认再次登记。'
+  if (pendingEntries.value.length) return '已有待鉴定记录，保存需确认再次登记。'
   return ''
 })
 const existingMouseRows = computed(() => existingEntries.value.map(entry => ({
@@ -665,7 +665,7 @@ async function submitForm() {
           messages.push(`${describeCodes(testedEntries.value)} 已经做过基因鉴定`)
         }
         if (pendingEntries.value.length) {
-          messages.push(`${describeCodes(pendingEntries.value)} 已有待检验记录`)
+          messages.push(`${describeCodes(pendingEntries.value)} 已有待鉴定记录`)
         }
         try {
           await ElMessageBox.confirm(

@@ -17,6 +17,7 @@ from backend.app.services.pedigree_service import parse_parents_detail, normaliz
 from backend.app.services.mouse_status_service import apply_mouse_status, ensure_mouse_status
 from backend.app.services.owner_service import apply_owner_status, is_euthanasia_owner
 from backend.app.services.mouse_creation import create_mouse_in_session, next_available_mouse_code, record_mouse_creation
+from backend.app.services.genotype_service import ensure_pending_genotype_record, update_pending_genotype_from_mouse
 from backend.app.auth import require_auth, require_admin
 
 router = APIRouter(prefix="/api/mice", tags=["Mice"])
@@ -457,6 +458,8 @@ def batch_create_mice(
             notes=data.notes
         )
         db.add(m)
+        if m.status == "待鉴定":
+            ensure_pending_genotype_record(m, db)
         created_mice.append(code)
 
     target_cage = db.get(Cage, cage_id) if cage_id and not status.removes_from_cage else None
@@ -488,6 +491,10 @@ def update_mouse(mouse_id: int, data: MouseUpdate, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="小鼠未找到")
 
     update_dict = data.model_dump(exclude_unset=True)
+    result_changes = {
+        field: value for field, value in update_dict.items()
+        if field in ("genotype_1", "genotype_2", "test_date") and value != getattr(mouse, field)
+    }
 
     if "mouse_code" in update_dict and update_dict["mouse_code"]:
         new_code = update_dict["mouse_code"].strip()
@@ -555,6 +562,7 @@ def update_mouse(mouse_id: int, data: MouseUpdate, db: Session = Depends(get_db)
     elif "cage_code" in update_dict and mouse.cage_id is not None and mouse.status == "出笼":
         mouse.status = "已领用" if mouse.owner_id or mouse.owner_name else "在笼"
     apply_owner_status(db, mouse)
+    update_pending_genotype_from_mouse(mouse, db, result_changes)
 
     db.commit()
     db.refresh(mouse)

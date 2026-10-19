@@ -124,6 +124,7 @@ class Mouse(Base):
 
     # 状态与领用信息
     status = Column(String(32), default="在笼", index=True)
+    status_before_genotyping = Column(String(32), nullable=True)  # 鉴定完成后恢复原状态
     claim_date = Column(String(32), nullable=True)  # 领取日期 YYYY-MM-DD
     claim_purpose = Column(String(256), nullable=True)  # 领用目的或实验记录
     source_room = Column(String(64), index=True, nullable=True)  # 来源鼠房

@@ -15,6 +15,7 @@ from backend.app.services.genotype_service import (
     genotype_result_condition, has_genotype_result, normalize_genotype_value,
     next_genotype_entry_order,
     sync_mouse_genotype_summary as _sync_mouse_genotype_summary,
+    sync_mouse_genotyping_status,
 )
 from backend.app.services.mouse_creation import create_mouse_in_session
 
@@ -322,6 +323,8 @@ def _add_genotype_record(
     db.flush()
     if mouse_created or has_genotype_result(gt.genotype_1, gt.genotype_2, gt.genotype_3):
         _sync_mouse_genotype_summary(mouse, db)
+    else:
+        sync_mouse_genotyping_status(mouse, db)
 
     return gt
 
@@ -378,8 +381,12 @@ def fill_genotype_records(
             if not was_tested and is_tested and not record.test_date:
                 record.test_date = datetime.date.today().isoformat()
         db.flush()
-        for mouse in db.query(Mouse).filter(Mouse.mouse_code.in_(codes)).all():
-            _sync_mouse_genotype_summary(mouse, db)
+        affected_codes = {record.mouse_code for record in records}
+        for mouse in db.query(Mouse).filter(Mouse.mouse_code.in_(affected_codes)).all():
+            if mouse.mouse_code in codes:
+                _sync_mouse_genotype_summary(mouse, db)
+            else:
+                sync_mouse_genotyping_status(mouse, db)
         db.commit()
     except Exception:
         db.rollback()
@@ -422,6 +429,8 @@ def update_genotype_record(
         mouse.dob = update_dict["dob"] or None
     if was_tested or is_tested:
         _sync_mouse_genotype_summary(mouse, db)
+    else:
+        sync_mouse_genotyping_status(mouse, db)
     db.commit()
     db.refresh(gt)
     return gt
@@ -441,5 +450,7 @@ def delete_genotype_record(
     db.flush()
     if was_tested:
         _sync_mouse_genotype_summary(mouse, db)
+    else:
+        sync_mouse_genotyping_status(mouse, db)
     db.commit()
     return {"message": "鉴定记录已删除"}

@@ -71,6 +71,14 @@ def migrate_genotype_entry_order(db_engine=engine):
             connection.exec_driver_sql("ALTER TABLE genotype_records ADD COLUMN entry_order INTEGER")
 
 
+def migrate_mouse_genotyping_status(db_engine=engine):
+    """Remember the original mouse status while its current test is pending."""
+    with db_engine.begin() as connection:
+        columns = connection.exec_driver_sql("PRAGMA table_info(mice)").fetchall()
+        if columns and not any(column[1] == "status_before_genotyping" for column in columns):
+            connection.exec_driver_sql("ALTER TABLE mice ADD COLUMN status_before_genotyping VARCHAR(32)")
+
+
 def migrate_transfer_request_fields():
     """Keep existing requests without a specified mouse quantity unset."""
     with engine.begin() as connection:

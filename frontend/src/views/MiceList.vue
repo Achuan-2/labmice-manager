@@ -214,19 +214,19 @@
             <div v-if="row.genotypes && row.genotypes.length > 0" class="flex items-center gap-1">
               <el-tag
                 size="small"
-                type="success"
+                :type="mouseGenotypeLabel(row) === '待鉴定' ? 'warning' : 'success'"
                 effect="plain"
                 class="cursor-pointer hover:opacity-80"
                 @click="viewGenotypes(row)"
               >
-                🔬 {{ row.genotypes[0].genotype_1 || '已鉴定' }}
+                🔬 {{ mouseGenotypeLabel(row) }}
                 <span v-if="row.genotypes.length > 1" class="text-xs ml-0.5">({{ row.genotypes.length }})</span>
               </el-tag>
             </div>
             <div v-else-if="row.genotype_1">
-              <el-tag size="small" type="info">{{ row.genotype_1 }}</el-tag>
+              <el-tag size="small" :type="mouseGenotypeLabel(row) === '待鉴定' ? 'warning' : 'info'">{{ mouseGenotypeLabel(row) }}</el-tag>
             </div>
-            <div v-else class="text-xs text-gray-300">未鉴定</div>
+            <div v-else class="text-xs text-gray-300">待鉴定</div>
           </template>
         </el-table-column>
 
@@ -382,8 +382,9 @@
         >
           <div class="flex justify-between items-center">
             <span class="text-gray-500 font-mono">📅 测试日期: {{ gt.test_date || '未记录' }}</span>
-            <el-tag size="small" type="success">{{ gt.genotype_1 || '阳性' }}</el-tag>
+            <el-tag size="small" :type="hasGenotypeResult(gt) ? 'success' : 'warning'">{{ hasGenotypeResult(gt) ? '已鉴定' : '待鉴定' }}</el-tag>
           </div>
+          <div v-if="hasGenotypeResult({ genotype_1: gt.genotype_1 })">Genotype 1: <span class="font-semibold">{{ gt.genotype_1 }}</span></div>
           <div v-if="gt.parents || activeMouse.parents" class="text-purple-700 font-mono flex items-center gap-1.5">
             <span>父母系谱:</span>
             <PedigreeTags :parents="gt.parents || activeMouse.parents" @click-parent="openMouseDetail" />
@@ -618,7 +619,7 @@ import SetOwnerDialog from '@/components/SetOwnerDialog.vue'
 import MouseDetailModal from '@/components/MouseDetailModal.vue'
 import MouseStatusManager from '@/components/MouseStatusManager.vue'
 import CageDetailDialog from '@/components/CageDetailDialog.vue'
-import { isClaimedOutOfCage, mouseStatusLabel } from '@/utils/mouseDisplay'
+import { hasGenotypeResult, isClaimedOutOfCage, mouseStatusLabel, mouseGenotypeLabel } from '@/utils/mouseDisplay'
 import { generateSequentialMouseCodes } from '@/utils/mouseCodes'
 import PedigreeTags from '@/components/PedigreeTags.vue'
 import { ElMessage } from 'element-plus'
@@ -740,6 +741,7 @@ function statusPresentation(status) {
     case '在笼': return { type: 'primary', dotClass: 'bg-blue-500' }
     case '繁育中': return { type: 'warning', dotClass: 'bg-amber-500' }
     case '实验中': return { type: 'warning', dotClass: 'bg-orange-500' }
+    case '待鉴定': return { type: 'warning', dotClass: 'bg-amber-500' }
     default: return { type: 'info', dotClass: 'bg-gray-400' }
   }
 }
