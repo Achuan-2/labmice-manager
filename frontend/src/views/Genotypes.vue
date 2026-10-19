@@ -26,8 +26,6 @@
           </el-select>
         </div>
 
-        <el-button type="primary" @click="searchGenotypes">查询</el-button>
-
         <div class="flex items-center gap-2" role="group" aria-label="基因鉴定结果排序">
           <ArrowDownWideNarrow class="shrink-0 text-gray-500" :size="16" aria-hidden="true" />
           <el-select v-model="sortBy" size="small" style="width: 140px" aria-label="排序方式" @change="searchGenotypes">
