@@ -4,7 +4,7 @@
       <div>
         <div class="text-base font-bold text-gray-800">小鼠基因型鉴定结果档案</div>
         <div class="text-xs text-gray-500 mt-1">
-          先登记待检验小鼠，再填写结果；支持批量编号和向下填充基因型
+          鉴定结果可留空，检验后再补充；支持批量编号和向下填充基因型
         </div>
       </div>
 
@@ -28,10 +28,7 @@
 
         <el-button type="primary" @click="searchGenotypes">查询</el-button>
 
-        <el-button v-if="authStore.isAdmin" type="primary" plain @click="openAddDialog(true)">
-          <el-icon class="mr-1"><Plus /></el-icon> 登记待检验小鼠
-        </el-button>
-        <el-button v-if="authStore.isAdmin" type="success" plain @click="openAddDialog(false)">
+        <el-button v-if="authStore.isAdmin" type="primary" plain @click="openAddDialog">
           <el-icon class="mr-1"><Plus /></el-icon> 录入鉴定结果
         </el-button>
       </div>
@@ -162,8 +159,8 @@
     </div>
 
     <!-- Add/Edit Genotype Dialog -->
-    <el-dialog v-model="showDialog" class="genotype-entry-dialog" :title="isEdit ? '编辑基因鉴定记录' : registeringPending ? '登记待检验小鼠' : '录入小鼠基因鉴定'" width="540px" align-center>
-      <div v-if="registeringPending && !isEdit" class="text-xs text-gray-500 mb-4">填写编号和基本信息即可保存，基因型和鉴定日期可留空；检验后可在表格填写结果并向下填充。</div>
+    <el-dialog v-model="showDialog" class="genotype-entry-dialog" :title="isEdit ? '编辑基因鉴定记录' : '录入鉴定结果'" width="540px" align-center>
+      <div v-if="!isEdit" class="text-xs text-gray-500 mb-4">基因型结果和鉴定日期均可留空；结果留空时保存为待检验，检验后可在表格补充并向下填充。</div>
       <el-form :model="form" label-width="110px" class="genotype-form" :disabled="saving">
         <template v-if="!isEdit">
           <el-form-item label="新增数量" required>
@@ -233,7 +230,7 @@
           <el-date-picker v-model="form.test_date" type="date" value-format="YYYY-MM-DD" placeholder="选择鉴定日期" style="width: 100%" />
         </el-form-item>
         <el-form-item label="Genotype 1">
-          <el-input v-model="form.genotype_1" placeholder="如 阳性, 野生型, 杂合子, 纯合子, HET" />
+          <el-input v-model="form.genotype_1" placeholder="选填，如 阳性、野生型、杂合子、纯合子、HET" />
         </el-form-item>
         <el-form-item label="Genotype 2">
           <el-input v-model="form.genotype_2" placeholder="第二基因型结果 (选填)" />
@@ -296,7 +293,6 @@ const savedSort = localStorage.getItem('genotype_sort')
 const gridSaving = ref(false)
 const activeCell = ref(null)
 const fillDrag = ref(null)
-const registeringPending = ref(false)
 let loadRequestId = 0
 
 const filters = reactive({
@@ -551,8 +547,7 @@ function cancelFill() {
 
 onBeforeUnmount(cancelFill)
 
-function openAddDialog(pending = false) {
-  registeringPending.value = pending
+function openAddDialog() {
   manualFields.clear()
   isEdit.value = false
   currentEditId.value = null
@@ -560,7 +555,7 @@ function openAddDialog(pending = false) {
   startCode.value = ''
   Object.assign(form, {
     mouse_code: '',
-    test_date: pending ? '' : new Date().toLocaleDateString('sv-SE'),
+    test_date: '',
     dob: '',
     strain: '',
     gender: '',
@@ -575,7 +570,6 @@ function openAddDialog(pending = false) {
 }
 
 function openEditDialog(row) {
-  registeringPending.value = false
   isEdit.value = true
   currentEditId.value = row.id
   Object.assign(form, {
