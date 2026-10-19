@@ -300,7 +300,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { ArrowDownWideNarrow, Funnel } from 'lucide-vue-next'
 import { genotypesApi, miceApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
@@ -308,6 +308,8 @@ import MouseDetailModal from '@/components/MouseDetailModal.vue'
 import PedigreeTags from '@/components/PedigreeTags.vue'
 import GenotypeFilterHeader from '@/components/GenotypeFilterHeader.vue'
 import GenotypeGridCell from '@/components/GenotypeGridCell.vue'
+import { apiErrorMessage } from '@/utils/apiError'
+import { useGridFill } from '@/composables/useGridFill'
 import { hasGenotypeResult } from '@/utils/mouseDisplay'
 import { generateSequentialMouseCodes } from '@/utils/mouseCodes'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -341,8 +343,9 @@ const validSavedSort = genotypeSortOptions.some(option => (
   ['asc', 'desc'].some(order => savedSort === `${option.value}_${order}`)
 ))
 const gridSaving = ref(false)
-const activeCell = ref(null)
-const fillDrag = ref(null)
+const { activeCell, fillDrag, activateCell, startFill, extendFill, isInFillRange, cancelFill } = useGridFill(
+  genotypes, () => gridSaving.value || loading.value || !authStore.isAdmin, saveGridValues,
+)
 let loadRequestId = 0
 
 const filters = reactive({
@@ -564,10 +567,6 @@ async function loadGenotypes() {
   }
 }
 
-function activateCell(id, field) {
-  if (!gridSaving.value && !fillDrag.value) activeCell.value = { id, field }
-}
-
 async function saveGridValues(recordIds, field, value) {
   if (gridSaving.value || loading.value || !authStore.isAdmin) return
   gridSaving.value = true
@@ -588,62 +587,11 @@ async function saveGridValues(recordIds, field, value) {
     ElMessage.success(`已保存 ${result.updated} 条鉴定信息`)
     if (genotypeFields.includes(field)) await loadGenotypeOptions()
   } catch (error) {
-    const detail = error.response?.data?.detail
-    ElMessage.error(typeof detail === 'string' ? detail : '鉴定信息保存失败，请检查填写内容后重试')
+    ElMessage.error(apiErrorMessage(error, '鉴定信息保存失败，请重试'))
   } finally {
     gridSaving.value = false
   }
 }
-
-function startFill(field, rowIndex, event) {
-  if (event.button !== 0 || gridSaving.value || loading.value || !authStore.isAdmin) return
-  cancelFill()
-  const row = genotypes.value[rowIndex]
-  activeCell.value = { id: row.id, field }
-  fillDrag.value = {
-    field, startIndex: rowIndex, endIndex: rowIndex, value: row[field] || '',
-    previousUserSelect: document.body.style.userSelect
-  }
-  document.body.style.userSelect = 'none'
-  document.addEventListener('pointerup', finishFill)
-  document.addEventListener('pointercancel', cancelFill)
-  document.addEventListener('keydown', handleFillKeydown)
-}
-
-function extendFill(field, rowIndex) {
-  if (fillDrag.value?.field === field) fillDrag.value.endIndex = rowIndex
-}
-
-function isInFillRange(field, rowIndex) {
-  const drag = fillDrag.value
-  return drag?.field === field && rowIndex >= Math.min(drag.startIndex, drag.endIndex)
-    && rowIndex <= Math.max(drag.startIndex, drag.endIndex)
-}
-
-function finishFill() {
-  const drag = fillDrag.value
-  if (!drag) return
-  const ids = genotypes.value
-    .slice(Math.min(drag.startIndex, drag.endIndex), Math.max(drag.startIndex, drag.endIndex) + 1)
-    .filter(row => row.id !== activeCell.value?.id)
-    .map(row => row.id)
-  cancelFill()
-  if (ids.length) saveGridValues(ids, drag.field, drag.value)
-}
-
-function handleFillKeydown(event) {
-  if (event.key === 'Escape') cancelFill()
-}
-
-function cancelFill() {
-  if (fillDrag.value) document.body.style.userSelect = fillDrag.value.previousUserSelect
-  fillDrag.value = null
-  document.removeEventListener('pointerup', finishFill)
-  document.removeEventListener('pointercancel', cancelFill)
-  document.removeEventListener('keydown', handleFillKeydown)
-}
-
-onBeforeUnmount(cancelFill)
 
 function openAddDialog() {
   createNewMouse.value = false

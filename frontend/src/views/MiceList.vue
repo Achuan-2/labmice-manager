@@ -129,9 +129,12 @@
     </div>
 
     <!-- Mice Table -->
+    <div v-if="authStore.isAdmin" class="text-xs text-gray-500 mb-2" role="status">
+      {{ gridSaving ? '正在保存小鼠资料…' : fillDrag ? `松开鼠标，将填充 ${Math.abs(fillDrag.endIndex - fillDrag.startIndex)} 只小鼠` : '点击品系、性别、出生日期、父母系谱、领取人、状态、领用用途或备注直接编辑，修改后自动保存。保存后拖动右下角蓝色方块可填充当前页同列，覆盖原值；Esc 取消编辑或拖动。编辑时保持行位置，查询或翻页后刷新筛选。' }}
+    </div>
     <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
       <el-table
-        v-loading="loading"
+        v-loading="loading || gridSaving"
         :data="miceList"
         row-key="id"
         stripe
@@ -154,58 +157,26 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="strain" label="品系 / 基因型" min-width="140">
-          <template #default="{ row }">
-            <div
-              v-if="row.strain"
-              class="inline-flex items-center gap-1 cursor-pointer text-blue-700 hover:text-blue-900 group"
-              title="点击查看并填写该品系背景说明与小鼠备注"
-              @click="openStrainNotesDialog(row)"
-            >
-              <span class="font-semibold underline-offset-2 group-hover:underline">{{ row.strain }}</span>
-              <span v-if="strainNotesMap[row.strain]" class="text-[11px]" title="已填品系全局备注">📝</span>
-            </div>
-            <span v-else class="text-gray-300">-</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="gender" label="性别" width="80">
-          <template #default="{ row }">
-            <el-tag
-              v-if="row.gender === 'M'"
-              size="small"
-              type="primary"
-              effect="light"
-            >
-              ♂ 雄
-            </el-tag>
-            <el-tag
-              v-else-if="row.gender === 'F'"
-              size="small"
-              type="danger"
-              effect="light"
-            >
-              ♀ 雌
-            </el-tag>
-            <el-tag v-else size="small" type="info">未知</el-tag>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="出生日期 / 周龄" width="160">
-          <template #default="{ row }">
-            <div class="text-xs">
-              <span class="text-gray-700 font-mono">{{ row.dob || '-' }}</span>
-              <span v-if="row.age_weeks !== null" class="ml-1.5 font-bold text-emerald-600">
-                ({{ row.age_weeks }} 周)
-              </span>
-            </div>
-          </template>
-        </el-table-column>
-
-        <!-- 父母系谱 Column -->
-        <el-table-column prop="parents" label="父母系谱 (M+F)" min-width="170">
-          <template #default="{ row }">
-            <PedigreeTags :parents="row.parents" @click-parent="openMouseDetail" />
+        <el-table-column v-for="column in mouseInfoColumns" :key="column.field" :prop="column.field" :label="column.label" :min-width="column.width">
+          <template #default="{ row, $index }">
+            <GenotypeGridCell v-bind="gridCellProps(row, column.field, $index)" v-on="gridCellEvents(row, column.field, $index)">
+              <template v-if="column.field === 'strain'">
+                <span class="font-semibold text-blue-700">{{ row.strain || '-' }}</span>
+                <button v-if="row.strain" type="button" class="ml-2 text-xs text-blue-500 shrink-0" title="查看品系背景说明与小鼠备注" @click.stop="openStrainNotesDialog(row)">
+                  {{ strainNotesMap[row.strain] ? '📝 备注' : '备注' }}
+                </button>
+              </template>
+              <template v-else-if="column.field === 'gender'">
+                <el-tag v-if="row.gender === 'M'" size="small" type="primary">♂ 雄</el-tag>
+                <el-tag v-else-if="row.gender === 'F'" size="small" type="danger">♀ 雌</el-tag>
+                <el-tag v-else size="small" type="info">未知</el-tag>
+              </template>
+              <div v-else-if="column.field === 'dob'" class="text-xs">
+                <span class="text-gray-700 font-mono">{{ row.dob || '-' }}</span>
+                <span v-if="row.age_weeks != null" class="ml-1.5 font-bold text-emerald-600">({{ row.age_weeks }} 周)</span>
+              </div>
+              <PedigreeTags v-else :parents="row.parents" @click-parent="openMouseDetail" />
+            </GenotypeGridCell>
           </template>
         </el-table-column>
 
@@ -257,40 +228,34 @@
         </el-table-column>
 
         <!-- Core Linkage Column: Owner / Claimer -->
-        <el-table-column label="当前领取人" width="140">
-          <template #default="{ row }">
-            <div v-if="row.owner_name" class="flex items-center gap-1">
-              <el-tag
-                size="small"
-                :style="getClaimerTagStyle(row.owner_name)"
-                class="font-medium border"
-              >
-                👤 {{ row.owner_name }}
-              </el-tag>
-            </div>
-            <div v-else>
-              <el-tag size="small" type="info" effect="plain" class="text-gray-400">未分配</el-tag>
-            </div>
+        <el-table-column label="当前领取人" min-width="165">
+          <template #default="{ row, $index }">
+            <GenotypeGridCell v-bind="gridCellProps(row, 'owner_name', $index)" v-on="gridCellEvents(row, 'owner_name', $index)">
+              <div v-if="row.owner_name" class="flex items-center gap-1">
+                <el-tag size="small" :style="getClaimerTagStyle(row.owner_name)" class="font-medium border">
+                  👤 {{ row.owner_name }}
+                </el-tag>
+              </div>
+              <div v-else>
+                <el-tag size="small" type="info" effect="plain" class="text-gray-400">未分配</el-tag>
+              </div>
+            </GenotypeGridCell>
           </template>
         </el-table-column>
 
-        <el-table-column prop="status" label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag
-              size="small"
-              :type="getStatusType(row.status)"
-            >
-              {{ mouseStatusLabel(row) }}
-            </el-tag>
+        <el-table-column prop="status" label="状态" min-width="135">
+          <template #default="{ row, $index }">
+            <GenotypeGridCell v-bind="gridCellProps(row, 'status', $index)" v-on="gridCellEvents(row, 'status', $index)">
+              <el-tag size="small" :type="getStatusType(row.status)">{{ mouseStatusLabel(row) }}</el-tag>
+            </GenotypeGridCell>
           </template>
         </el-table-column>
 
-        <el-table-column prop="claim_purpose" label="领用用途 / 备注" min-width="160">
-          <template #default="{ row }">
-            <div class="text-xs text-gray-600 truncate" :title="row.claim_purpose || row.notes">
-              <span v-if="row.claim_purpose" class="text-blue-600 font-medium">[{{ row.claim_purpose }}] </span>
-              {{ row.notes || '' }}
-            </div>
+        <el-table-column v-for="column in noteColumns" :key="column.field" :prop="column.field" :label="column.label" min-width="180">
+          <template #default="{ row, $index }">
+            <GenotypeGridCell v-bind="gridCellProps(row, column.field, $index)" v-on="gridCellEvents(row, column.field, $index)">
+              <span class="text-xs text-gray-600 truncate" :title="row[column.field]">{{ row[column.field] || '-' }}</span>
+            </GenotypeGridCell>
           </template>
         </el-table-column>
 
@@ -624,6 +589,9 @@ import CageDetailDialog from '@/components/CageDetailDialog.vue'
 import { hasGenotypeResult, isClaimedOutOfCage, mouseStatusLabel, mouseGenotypeLabel } from '@/utils/mouseDisplay'
 import { generateSequentialMouseCodes } from '@/utils/mouseCodes'
 import PedigreeTags from '@/components/PedigreeTags.vue'
+import GenotypeGridCell from '@/components/GenotypeGridCell.vue'
+import { useGridFill } from '@/composables/useGridFill'
+import { apiErrorMessage } from '@/utils/apiError'
 import { ElMessage } from 'element-plus'
 
 const route = useRoute()
@@ -637,7 +605,19 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(50)
 const selectedMice = ref([])
+const gridSaving = ref(false)
+const { activeCell, fillDrag, activateCell, startFill, extendFill, isInFillRange, cancelFill } = useGridFill(
+  miceList, () => gridSaving.value || loading.value || !authStore.isAdmin, saveGridValues,
+)
 let loadRequestId = 0
+
+const mouseInfoColumns = [
+  { field: 'strain', label: '品系 / 基因型', width: 180 },
+  { field: 'gender', label: '性别', width: 110 },
+  { field: 'dob', label: '出生日期 / 周龄', width: 190 },
+  { field: 'parents', label: '父母系谱 (M+F)', width: 230 },
+]
+const noteColumns = [{ field: 'claim_purpose', label: '领用用途' }, { field: 'notes', label: '备注' }]
 
 const mouseSortOptions = [
   { value: 'added', label: '录入顺序' },
@@ -735,6 +715,61 @@ const mouseForm = reactive({
 })
 
 const ALL_STATUSES = ref([])
+
+const gridOptions = computed(() => ({
+  strain: [...new Set([...strainOptions.value, ...miceList.value.map(row => row.strain).filter(Boolean)])],
+  gender: [{ value: 'M', label: '♂ 雄' }, { value: 'F', label: '♀ 雌' }, { value: '未知', label: '未知' }],
+  parents: [...new Set(miceList.value.map(row => row.parents).filter(Boolean))],
+  owner_name: claimerOptions.value.map(claimer => ({ value: claimer.name, label: claimer.name })),
+  status: ALL_STATUSES.value,
+}))
+
+function gridCellProps(row, field, rowIndex) {
+  const select = ['gender', 'owner_name', 'status'].includes(field)
+  return {
+    value: row[field] || '',
+    label: [...mouseInfoColumns, ...noteColumns].find(column => column.field === field)?.label
+      || (field === 'owner_name' ? '领取人' : '状态'),
+    editorType: field === 'dob' ? 'date' : select ? 'select' : 'text',
+    maxLength: field === 'notes' ? 10000 : field === 'claim_purpose' ? 256 : 128,
+    options: gridOptions.value[field] || [],
+    editable: authStore.isAdmin,
+    editOnClick: true,
+    clearable: !['gender', 'status'].includes(field),
+    showEditButton: field === 'parents',
+    disabled: gridSaving.value || loading.value || !!fillDrag.value,
+    active: activeCell.value?.id === row.id && activeCell.value?.field === field,
+    inFillRange: isInFillRange(field, rowIndex),
+  }
+}
+
+function gridCellEvents(row, field, rowIndex) {
+  return {
+    activate: () => activateCell(row.id, field),
+    save: value => saveGridValues([row.id], field, value),
+    'fill-start': event => startFill(field, rowIndex, event),
+    'fill-enter': () => extendFill(field, rowIndex),
+  }
+}
+
+async function saveGridValues(mouseIds, field, value) {
+  if (gridSaving.value || loading.value || !authStore.isAdmin) return
+  gridSaving.value = true
+  try {
+    const result = await miceApi.batchUpdateFields({ mouse_ids: mouseIds, [field]: value || null })
+    // Apply server-normalized values and derived age/status without reordering rows.
+    const updates = new Map(result.items.map(mouse => [mouse.id, mouse]))
+    for (const row of miceList.value) {
+      if (updates.has(row.id)) Object.assign(row, updates.get(row.id))
+    }
+    ElMessage.success(`已保存 ${result.affected_count} 只小鼠的资料`)
+    if (['strain', 'parents', 'owner_name', 'status'].includes(field)) await loadOptions()
+  } catch (error) {
+    ElMessage.error(apiErrorMessage(error, '小鼠资料保存失败，请重试'))
+  } finally {
+    gridSaving.value = false
+  }
+}
 
 function statusPresentation(status) {
   if (status.removes_from_cage) return { type: 'danger', dotClass: 'bg-red-700' }
@@ -856,6 +891,7 @@ async function handleStatusesChanged() {
 }
 
 async function loadMice() {
+  cancelFill()
   const requestId = ++loadRequestId
   loading.value = true
   try {

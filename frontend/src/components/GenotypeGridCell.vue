@@ -2,8 +2,8 @@
   <div
     class="genotype-grid-cell"
     :class="{ 'is-active': active && editable, 'is-fill-range': inFillRange, 'is-editable': editable }"
-    :title="editable ? `双击填写${label}；拖动右下角方块向下填充` : ''"
-    @click="emit('activate')"
+    :title="editable ? `${editOnClick ? '点击' : '双击'}填写${label}；拖动右下角方块向下填充` : ''"
+    @click="handleClick"
     @dblclick="startEdit"
     @pointerenter="emit('fill-enter')"
   >
@@ -17,7 +17,7 @@
       :placeholder="`选择${label}`"
       size="small"
       @change="finishEdit"
-      @blur="finishEdit"
+      @blur="finishDateEdit"
       @keydown.esc.stop="editing = false"
     />
     <el-select
@@ -27,7 +27,8 @@
       class="genotype-cell-input"
       :placeholder="`选择${label}`"
       size="small"
-      clearable
+      :clearable="clearable"
+      filterable
       automatic-dropdown
       @change="finishEdit"
       @visible-change="visible => { if (!visible) finishEdit() }"
@@ -86,6 +87,8 @@ const props = defineProps({
   editorType: { type: String, default: 'genotype' },
   maxLength: { type: Number, default: 64 },
   showEditButton: Boolean,
+  editOnClick: Boolean,
+  clearable: { type: Boolean, default: true },
   editable: Boolean,
   active: Boolean,
   inFillRange: Boolean,
@@ -103,7 +106,7 @@ function suggestions(query, callback) {
 }
 
 async function startEdit() {
-  if (!props.editable || props.disabled) return
+  if (editing.value || !props.editable || props.disabled) return
   emit('activate')
   draft.value = props.value || ''
   editing.value = true
@@ -111,11 +114,22 @@ async function startEdit() {
   input.value?.focus()
 }
 
+function handleClick() {
+  emit('activate')
+  if (props.editOnClick) startEdit()
+}
+
 function finishEdit() {
   if (!editing.value) return
   editing.value = false
   const value = (draft.value || '').trim()
   if (value !== (props.value || '').trim()) emit('save', value)
+}
+
+async function finishDateEdit() {
+  // The date picker parses typed dates after emitting blur; let its model settle first.
+  await nextTick()
+  finishEdit()
 }
 </script>
 

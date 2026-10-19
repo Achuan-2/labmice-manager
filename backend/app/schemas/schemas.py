@@ -229,7 +229,12 @@ class MouseBatchUpdateFields(BaseModel):
     mouse_ids: List[int]
     dob: Optional[str] = None
     gender: Optional[str] = None
-    strain: Optional[str] = None
+    strain: Optional[str] = Field(default=None, max_length=128)
+    parents: Optional[str] = Field(default=None, max_length=128)
+    owner_name: Optional[str] = Field(default=None, max_length=64)
+    status: Optional[str] = Field(default=None, max_length=32)
+    claim_purpose: Optional[str] = Field(default=None, max_length=256)
+    notes: Optional[str] = None
 
 class MouseStatusCreate(BaseModel):
     name: str

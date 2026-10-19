@@ -593,31 +593,79 @@ def batch_update_fields(data: MouseBatchUpdateFields, db: Session = Depends(get_
         raise HTTPException(status_code=400, detail="请选择有效的性别")
     if "dob" in updates and updates["dob"]:
         try:
-            datetime.date.fromisoformat(updates["dob"])
+            if datetime.date.fromisoformat(updates["dob"]).isoformat() != updates["dob"]:
+                raise ValueError("日期格式需为 YYYY-MM-DD")
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail="出生日期格式无效") from exc
+    if "status" in updates and not (updates["status"] or "").strip():
+        raise HTTPException(status_code=400, detail="请选择有效的状态")
 
     mice = db.query(Mouse).filter(Mouse.id.in_(mouse_ids)).all()
     if len(mice) != len(mouse_ids):
         raise HTTPException(status_code=404, detail="部分小鼠不存在，请刷新后重试")
 
-    normalized_strain = None
-    if "strain" in updates:
-        raw_strain = str(updates["strain"] or "").strip()
-        normalized_strain = normalize_strain_name(db, raw_strain) if raw_strain else ""
-
-    for mouse in mice:
-        if "dob" in updates:
-            mouse.dob = updates["dob"] or None
-        if "gender" in updates:
-            mouse.gender = updates["gender"]
+    try:
         if "strain" in updates:
-            mouse.strain = normalized_strain
-    db.commit()
+            raw_strain = (updates["strain"] or "").strip()
+            updates["strain"] = normalize_strain_name(db, raw_strain) if raw_strain else ""
+        if "parents" in updates:
+            updates["parents"] = normalize_parents_pedigree(db, (updates["parents"] or "").strip()) or None
+        if "status" in updates:
+            updates["status"] = ensure_mouse_status(db, updates["status"]).name
+
+        owner = None
+        if "owner_name" in updates:
+            name = (updates["owner_name"] or "").strip()
+            if name:
+                owner = db.query(Claimer).filter(Claimer.name == name).first()
+                if owner is None:
+                    owner = Claimer(name=name)
+                    db.add(owner)
+                    db.flush()
+
+        today = datetime.date.today().isoformat()
+        for mouse in mice:
+            source_room = mouse.cage.room if mouse.cage else mouse.source_room
+            source_cage = mouse.cage.cage_code if mouse.cage else None
+            old_owner, old_status = mouse.owner_name, mouse.status
+            for field in ("dob", "gender", "strain", "parents", "claim_purpose", "notes"):
+                if field in updates:
+                    setattr(mouse, field, updates[field] if field == "strain" else updates[field] or None)
+            if "owner_name" in updates:
+                mouse.owner_id = owner.id if owner else None
+                mouse.owner_name = owner.name if owner else None
+                if mouse.owner_name != old_owner:
+                    mouse.claim_date = today if owner else None
+                if "status" not in updates and mouse.status in ("在笼", "已领用"):
+                    apply_mouse_status(db, mouse, "已领用" if owner else "在笼")
+            if "status" in updates:
+                apply_mouse_status(db, mouse, updates["status"])
+            if "owner_name" in updates or "status" in updates:
+                apply_owner_status(db, mouse)
+            # Record linkage changes with the original location before a death/out-of-cage status clears it.
+            for changed, action, description in (
+                (mouse.owner_name != old_owner, "设置领取人", f"领取人: {old_owner or '未分配'} → {mouse.owner_name or '未分配'}"),
+                (mouse.status != old_status, "状态变更", f"状态: {old_status} → {mouse.status}"),
+            ):
+                if changed:
+                    db.add(TransferLog(
+                        action_type=action, mouse_codes=mouse.mouse_code, mouse_count=1,
+                        claimer_name=mouse.owner_name, source_room=source_room, source_cage=source_cage,
+                        operator=current_user.display_name or current_user.username,
+                        date=today, status="已完成", notes=f"列表快速编辑；{description}",
+                    ))
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception:
+        db.rollback()
+        raise
     return {
         "success": True,
         "affected_count": len(mice),
         "message": f"成功批量更新 {len(mice)} 只小鼠",
+        "items": [enrich_mouse_response(mouse, db=db) for mouse in mice],
     }
 
 @router.post("/batch-set-owner")
