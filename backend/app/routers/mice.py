@@ -17,7 +17,9 @@ from backend.app.services.pedigree_service import parse_parents_detail, normaliz
 from backend.app.services.mouse_status_service import apply_mouse_status, ensure_mouse_status
 from backend.app.services.owner_service import apply_owner_status, is_euthanasia_owner
 from backend.app.services.mouse_creation import create_mouse_in_session, next_available_mouse_code, record_mouse_creation
-from backend.app.services.genotype_service import ensure_pending_genotype_record, update_pending_genotype_from_mouse
+from backend.app.services.genotype_service import (
+    PENDING_GENOTYPE_VALUES, ensure_pending_genotype_record, genotype_result_condition, update_pending_genotype_from_mouse,
+)
 from backend.app.auth import require_auth, require_admin
 
 router = APIRouter(prefix="/api/mice", tags=["Mice"])
@@ -167,11 +169,22 @@ def list_mice(
     status: Optional[str] = None,
     has_owner: Optional[bool] = None,
     in_cage: Optional[bool] = None,
-    sort_by: Literal["added", "mouse_code", "dob", "strain", "status"] = "added",
+    dob_from: Optional[datetime.date] = None,
+    dob_to: Optional[datetime.date] = None,
+    genotype: Optional[str] = None,
+    test_status: Optional[Literal["pending", "tested"]] = None,
+    claim_purpose: Optional[str] = None,
+    notes: Optional[str] = None,
+    sort_by: Literal[
+        "added", "mouse_code", "dob", "strain", "status", "gender", "parents",
+        "genotype_1", "cage_code", "owner_name", "claim_purpose", "notes",
+    ] = "added",
     sort_order: Literal["asc", "desc"] = "desc",
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth)
 ):
+    if dob_from and dob_to and dob_from > dob_to:
+        raise HTTPException(status_code=422, detail="出生日期起始不能晚于截止日期")
     query = db.query(Mouse).join(Mouse.cage, isouter=True)
 
     if mouse_code:
@@ -199,7 +212,9 @@ def list_mice(
     if parent_filters:
         parent_expression = normalized_parents_expression()
         query = query.filter(or_(*(parent_expression.like(f"%,{parent.lower()},%") for parent in parent_filters)))
-    if gender:
+    if gender == "未知":
+        query = query.filter(func.coalesce(func.trim(Mouse.gender), "").in_(("", "未知")))
+    elif gender:
         query = query.filter(Mouse.gender == gender)
     if owner_name:
         query = query.filter(Mouse.owner_name == owner_name)
@@ -210,10 +225,36 @@ def list_mice(
     elif in_cage is False:
         query = query.filter(Mouse.cage_id.is_(None))
     if has_owner is not None:
-        if has_owner:
-            query = query.filter(Mouse.owner_id.isnot(None))
-        else:
-            query = query.filter(Mouse.owner_id.is_(None))
+        owner_condition = or_(Mouse.owner_id.isnot(None), func.coalesce(func.trim(Mouse.owner_name), "") != "")
+        query = query.filter(owner_condition if has_owner else ~owner_condition)
+    if dob_from or dob_to:
+        query = query.filter(func.coalesce(func.trim(Mouse.dob), "") != "")
+        if dob_from:
+            query = query.filter(Mouse.dob >= dob_from.isoformat())
+        if dob_to:
+            query = query.filter(Mouse.dob <= dob_to.isoformat())
+    if genotype:
+        pattern = f"%{genotype.strip()}%"
+        query = query.filter(or_(
+            Mouse.genotype_1.ilike(pattern), Mouse.genotype_2.ilike(pattern),
+            Mouse.genotype_records.any(or_(
+                GenotypeRecord.genotype_1.ilike(pattern), GenotypeRecord.genotype_2.ilike(pattern),
+                GenotypeRecord.genotype_3.ilike(pattern),
+            )),
+        ))
+    if test_status:
+        tested = and_(
+            func.coalesce(Mouse.status, "") != "待鉴定",
+            or_(
+                func.coalesce(func.trim(Mouse.genotype_1), "").notin_(PENDING_GENOTYPE_VALUES),
+                func.coalesce(func.trim(Mouse.genotype_2), "").notin_(PENDING_GENOTYPE_VALUES),
+                Mouse.genotype_records.any(genotype_result_condition()),
+            ),
+        )
+        query = query.filter(tested if test_status == "tested" else ~tested)
+    for column, value in ((Mouse.claim_purpose, claim_purpose), (Mouse.notes, notes)):
+        if value and value.strip():
+            query = query.filter(column.ilike(f"%{value.strip()}%"))
 
     total = query.count()
 
@@ -241,7 +282,7 @@ def list_mice(
         )
         order_clauses.append(relevance)
     if sort_by != "added":
-        sort_column = getattr(Mouse, sort_by)
+        sort_column = Cage.cage_code if sort_by == "cage_code" else getattr(Mouse, sort_by)
         # Missing values stay last in either direction; ties follow entry order.
         missing_value = func.coalesce(func.trim(sort_column), "") == ""
         order_clauses.append(case((missing_value, 1), else_=0))

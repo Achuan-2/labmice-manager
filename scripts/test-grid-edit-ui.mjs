@@ -13,6 +13,7 @@ const browser = await chromium.launch({ channel: 'chrome', headless: true })
 const context = await browser.newContext({ viewport: { width: 2200, height: 1000 } })
 const errors = []
 const writes = []
+const queries = []
 let rejectNextGenotypeSave = false
 const user = { id: 1, role: 'admin', username: 'ui-test', display_name: '交互测试', is_authenticated: true }
 const mice = [1, 2, 3].map(id => ({
@@ -50,7 +51,10 @@ await context.route('**/api/**', async route => {
     json = { updated: items.length, items }
   } else if (path === '/api/genotypes/filter-options') json = { genotype_1: ['HET'], genotype_2: [], genotype_3: [] }
   else if (path === '/api/genotypes') json = { total: records.length, items: records }
-  else if (path === '/api/mice') json = { total: mice.length, items: mice }
+  else if (path === '/api/mice') {
+    queries.push(Object.fromEntries(new URL(request.url()).searchParams))
+    json = { total: mice.length, items: mice }
+  }
   else if (path === '/api/mice/all-strains') json = ['5xFAD', 'C57BL/6J']
   else if (path === '/api/mouse-statuses') json = [{ name: '在笼' }, { name: '实验中' }, { name: '死亡', removes_from_cage: true }]
   else if (path === '/api/claimers' || path === '/api/members') json = [{ id: 1, name: '领取人甲' }]
@@ -72,9 +76,21 @@ async function cell(code, label) {
 
 async function saved(action) {
   const response = page.waitForResponse(response => /batch-(update-fields|fill)$/.test(new URL(response.url()).pathname))
-  await action()
-  await response
+  await Promise.all([response, action()])
   await page.locator('.el-loading-mask').waitFor({ state: 'hidden' })
+}
+
+async function queried(action) {
+  const response = page.waitForResponse(response => new URL(response.url()).pathname === '/api/mice')
+  await Promise.all([response, action()])
+  await page.locator('.el-loading-mask').waitFor({ state: 'hidden' })
+}
+
+async function openColumnFilter(label) {
+  await page.getByRole('button', { name: `${label}列菜单`, exact: true }).click()
+  const menu = page.getByLabel(`${label}操作菜单`, { exact: true })
+  await menu.getByRole('button', { name: '筛选', exact: true }).click()
+  return menu
 }
 
 async function dragFill(source, target, cancel = false) {
@@ -94,6 +110,48 @@ try {
   await page.goto(`${baseURL}/mice`)
   console.log('Checking mouse cells')
   await page.getByText('UI001', { exact: true }).first().waitFor()
+  assert.equal(await page.getByPlaceholder('全部品系', { exact: true }).count(), 0)
+  assert.equal(await page.getByRole('radio', { name: '全部小鼠', exact: true }).count(), 0)
+  const strainMenu = await openColumnFilter('品系 / 基因型')
+  await strainMenu.getByRole('combobox', { name: '品系', exact: true }).click()
+  await page.getByRole('option', { name: '5xFAD', exact: true }).click()
+  await queried(() => strainMenu.getByRole('button', { name: '应用筛选', exact: true }).click())
+  assert.equal(queries.at(-1).strain, '5xFAD')
+  assert.equal(queries.at(-1).page, '1')
+  await page.getByRole('button', { name: '性别列菜单', exact: true }).click()
+  await queried(() => page.getByLabel('性别操作菜单', { exact: true }).getByRole('button', { name: '降序', exact: true }).click())
+  assert.equal(queries.at(-1).sort_by, 'gender')
+  assert.equal(queries.at(-1).sort_order, 'desc')
+  assert.equal(queries.at(-1).strain, '5xFAD')
+  const clearStrainMenu = await openColumnFilter('品系 / 基因型')
+  await queried(() => clearStrainMenu.getByRole('button', { name: '清除此列', exact: true }).click())
+  assert.equal(queries.at(-1).strain, undefined)
+  assert.equal(queries.at(-1).sort_by, 'gender')
+  const ownerMenu = await openColumnFilter('当前领取人')
+  await ownerMenu.getByRole('combobox', { name: '领用情况', exact: true }).click()
+  await page.getByRole('option', { name: '未领用（待分配）', exact: true }).click()
+  await queried(() => ownerMenu.getByRole('button', { name: '应用筛选', exact: true }).click())
+  assert.equal(queries.at(-1).has_owner, 'false')
+  const dateMenu = await openColumnFilter('出生日期 / 周龄')
+  await dateMenu.getByPlaceholder('出生日期起始', { exact: true }).fill('2026-08-01')
+  await dateMenu.getByPlaceholder('出生日期起始', { exact: true }).press('Tab')
+  await dateMenu.getByPlaceholder('出生日期截止', { exact: true }).fill('2026-10-19')
+  await dateMenu.getByPlaceholder('出生日期截止', { exact: true }).press('Tab')
+  await queried(() => dateMenu.getByRole('button', { name: '应用筛选', exact: true }).click())
+  assert.equal(queries.at(-1).dob_from, '2026-08-01')
+  assert.equal(queries.at(-1).dob_to, '2026-10-19')
+  await page.getByRole('button', { name: '耳标 / 编号列菜单', exact: true }).click()
+  await page.getByLabel('耳标 / 编号操作菜单', { exact: true }).waitFor({ state: 'visible' })
+  await page.screenshot({ path: fileURLToPath(new URL('../build/inline-edit-ui/column-menu.png', import.meta.url)), fullPage: true, animations: 'disabled' })
+  await queried(() => page.getByLabel('耳标 / 编号操作菜单', { exact: true }).getByRole('button', { name: '清除全部筛选', exact: true }).click())
+  assert.equal(queries.at(-1).strain, undefined)
+  assert.equal(queries.at(-1).dob_from, undefined)
+  assert.equal(queries.at(-1).has_owner, undefined)
+  await page.getByRole('button', { name: '耳标 / 编号列菜单', exact: true }).click()
+  await queried(() => page.getByLabel('耳标 / 编号操作菜单', { exact: true }).getByRole('button', { name: '恢复录入顺序', exact: true }).click())
+  assert.equal(queries.at(-1).sort_by, 'added')
+  assert.equal(queries.at(-1).sort_order, 'desc')
+  console.log('Column filters, cross-column sorting and resets passed')
   const strain = await cell('UI001', '品系 / 基因型')
   assert.equal(await strain.getByRole('button', { name: '备注', exact: true }).count(), 0)
   await strain.locator('span').first().click()
@@ -116,7 +174,7 @@ try {
   console.log('Mouse gender passed; checking calendar')
   await dob.click()
   await page.locator('.el-picker-panel:visible').waitFor()
-  await saved(() => page.locator('.el-date-table td.available:not(.prev-month):not(.next-month)').filter({ hasText: /^15$/ }).click())
+  await saved(() => page.locator('.el-picker-panel:visible .el-date-table td.available:not(.prev-month):not(.next-month)').filter({ hasText: /^15$/ }).click())
   assert.match(writes.at(-1).dob, /^\d{4}-\d{2}-15$/)
   await saved(async () => dragFill(dob, await cell('UI003', '出生日期 / 周龄')))
   assert.deepEqual(writes.at(-1).mouse_ids, [2, 3])
@@ -168,7 +226,7 @@ try {
   const genotypeDob = await cell('UI001', '出生日期')
   await genotypeDob.dblclick()
   await page.locator('.el-picker-panel:visible').waitFor()
-  await saved(() => page.locator('.el-date-table td.available:not(.prev-month):not(.next-month)').filter({ hasText: /^16$/ }).click())
+  await saved(() => page.locator('.el-picker-panel:visible .el-date-table td.available:not(.prev-month):not(.next-month)').filter({ hasText: /^16$/ }).click())
   assert.equal(writes.at(-1).field, 'dob')
   assert.match(writes.at(-1).value, /^\d{4}-\d{2}-16$/)
   await saved(async () => dragFill(genotypeDob, await cell('UI003', '出生日期')))
@@ -181,13 +239,13 @@ try {
   assert.equal(writes.at(-1).value, 'M')
   rejectNextGenotypeSave = true
   await genotypeDob.dblclick()
-  await saved(() => page.locator('.el-date-table td.available:not(.prev-month):not(.next-month)').filter({ hasText: /^17$/ }).click())
+  await saved(() => page.locator('.el-picker-panel:visible .el-date-table td.available:not(.prev-month):not(.next-month)').filter({ hasText: /^17$/ }).click())
   await page.getByText('后端尚未支持此列，请重启后端服务后重试', { exact: true }).waitFor()
   assert.deepEqual(errors, [])
 
   await mkdir(new URL('../build/inline-edit-ui/', import.meta.url), { recursive: true })
   await page.screenshot({ path: fileURLToPath(new URL('../build/inline-edit-ui/genotypes.png', import.meta.url)), fullPage: true })
-  console.log('PASS: single-click editing, dropdowns, calendar selection, drag fill, Escape cancellation, genotype saves, and old-backend errors. All APIs mocked.')
+  console.log('PASS: column filter/sort menus, resets, single-click editing, dropdowns, calendar selection, drag fill, Escape cancellation, genotype saves, and old-backend errors. All APIs mocked.')
 } catch (error) {
   await page.screenshot({ path: fileURLToPath(new URL('../build/inline-edit-ui/failure.png', import.meta.url)), fullPage: true })
   console.error('Writes before failure:', writes)

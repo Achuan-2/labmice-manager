@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from backend.app.auth import require_admin, require_auth
 from backend.app.database import Base, get_db
-from backend.app.models.models import Mouse, User
+from backend.app.models.models import Cage, GenotypeRecord, Mouse, User
 from backend.app.routers.genotypes import router as genotype_router
 from backend.app.routers.mice import router
 
@@ -110,6 +110,71 @@ class MouseSortingTests(unittest.TestCase):
         for params in ({"sort_by": "invalid"}, {"sort_order": "invalid"}):
             with self.subTest(params=params):
                 self.assertEqual(self.client.get("/api/mice", params=params).status_code, 422)
+
+    def test_column_menu_date_range_is_inclusive_and_excludes_blank_dates(self):
+        self.assertEqual(self.codes(dob_from="2026-05-01", dob_to="2026-06-01"), ["R020", "R100"])
+        self.assertEqual(self.codes(dob_from="2026-06-01"), ["R020"])
+        self.assertEqual(self.codes(dob_to="2026-05-01"), ["R100"])
+        self.assertEqual(self.codes(dob_from="2026-06-02"), [])
+        for params in ({"dob_from": "2026-02-30"}, {"dob_from": "2026-06-01", "dob_to": "2026-05-01"}):
+            self.assertEqual(self.client.get("/api/mice", params=params).status_code, 422)
+
+    def test_column_menus_combine_filters_before_paginating(self):
+        with Session(self.engine) as db:
+            mouse = db.query(Mouse).filter_by(mouse_code="R100").one()
+            mouse.claim_purpose, mouse.notes, mouse.gender = "成像实验", "待复查", "F"
+            db.commit()
+        self.assertEqual(self.codes(claim_purpose="成像", notes="复查", gender="F", strain="B"), ["R100"])
+        self.assertEqual(self.codes(claim_purpose="成像", notes="related"), [])
+        self.assertEqual(self.codes(notes="related"), ["R003"])
+        result = self.listing(strain="B", dob_from="2026-05-01", page_size=1, page=2, sort_by="dob", sort_order="desc")
+        self.assertEqual(result["total"], 2)
+        self.assertEqual([row["mouse_code"] for row in result["items"]], ["R100"])
+
+    def test_column_menu_ownership_handles_legacy_names_and_unknown_gender(self):
+        with Session(self.engine) as db:
+            mouse = db.query(Mouse).filter_by(mouse_code="R100").one()
+            mouse.owner_name, mouse.gender = "领取人甲", None
+            db.query(Mouse).filter_by(mouse_code="R003").one().gender = ""
+            db.query(Mouse).filter_by(mouse_code="R020").one().gender = "M"
+            db.commit()
+        self.assertEqual(self.codes(owner_name="领取人甲", has_owner=True), ["R100"])
+        self.assertNotIn("R100", self.codes(has_owner=False))
+        self.assertEqual(set(self.codes(gender="未知")), {"R100", "R003", "R004"})
+
+    def test_genotype_menu_searches_history_and_matches_visible_pending_status(self):
+        with Session(self.engine) as db:
+            mice = {mouse.mouse_code: mouse for mouse in db.query(Mouse)}
+            mice["R100"].genotype_1 = "HET"
+            mice["R003"].genotype_1 = "待测"
+            mice["R020"].status = "待鉴定"
+            mice["R020"].genotype_1 = "WT"
+            db.add_all([
+                GenotypeRecord(mouse=mice["R004"], mouse_code="R004", genotype_3="第三基因阳性"),
+                GenotypeRecord(mouse=mice["R020"], mouse_code="R020", genotype_1="WT"),
+            ])
+            db.commit()
+        self.assertEqual(set(self.codes(test_status="tested")), {"R100", "R004"})
+        self.assertEqual(set(self.codes(test_status="pending")), {"R003", "R020"})
+        self.assertEqual(self.codes(genotype="第三基因", test_status="tested"), ["R004"])
+        self.assertEqual(self.codes(genotype="HET"), ["R100"])
+
+    def test_each_new_column_sorts_all_rows_and_keeps_blanks_last(self):
+        with Session(self.engine) as db:
+            mice = {mouse.mouse_code: mouse for mouse in db.query(Mouse)}
+            first, second = mice["R100"], mice["R020"]
+            for field in ("gender", "parents", "owner_name", "claim_purpose", "notes", "genotype_1"):
+                for mouse in mice.values():
+                    setattr(mouse, field, None)
+                setattr(first, field, "A")
+                setattr(second, field, "B")
+            first.cage = Cage(room="测试鼠房", cage_code="A1")
+            second.cage = Cage(room="测试鼠房", cage_code="B1")
+            db.commit()
+        for field in ("gender", "parents", "owner_name", "claim_purpose", "notes", "genotype_1", "cage_code"):
+            with self.subTest(field=field):
+                self.assertEqual(self.codes(sort_by=field, sort_order="asc"), ["R100", "R020", "R003", "R004"])
+                self.assertEqual(self.codes(sort_by=field, sort_order="desc"), ["R020", "R100", "R004", "R003"])
 
 
 if __name__ == "__main__":

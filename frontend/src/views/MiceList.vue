@@ -1,76 +1,14 @@
 <template>
   <div class="mice-page">
-    <!-- Filter Bar -->
-    <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-4">
-      <div class="mouse-filter-grid grid gap-3 mb-3 items-start">
-        <el-input
-          v-model="filters.keyword"
-          placeholder="搜索耳标、品系、基因型或备注"
-          clearable
-          prefix-icon="Search"
-          @keyup.enter="handleSearch"
-        />
-
-        <el-select v-model="filters.room" clearable placeholder="全部鼠房" @change="handleSearch">
-          <el-option v-for="r in roomOptions" :key="r" :label="r" :value="r" />
-        </el-select>
-
-        <el-select v-model="filters.strain" clearable filterable placeholder="全部品系" @change="handleSearch">
-          <el-option v-for="s in strainOptions" :key="s" :label="s" :value="s" />
-        </el-select>
-
-        <el-select
-          v-model="filters.parents"
-          multiple
-          clearable
-          filterable
-          :reserve-keyword="false"
-          placeholder="按父母筛选"
-          @change="handleSearch"
-        >
-          <el-option v-for="parent in parentOptions" :key="parent" :label="parentOptionLabel(parent)" :value="parent" />
-        </el-select>
-
-        <el-select v-model="filters.gender" clearable placeholder="全部性别" @change="handleSearch">
-          <el-option label="雄性 (M)" value="M" />
-          <el-option label="雌性 (F)" value="F" />
-        </el-select>
-
-        <el-select v-model="filters.status" clearable placeholder="全部状态" @change="handleSearch">
-          <el-option v-for="st in ALL_STATUSES" :key="st.value" :label="st.label" :value="st.value" />
-        </el-select>
-
-        <el-select v-model="filters.owner_name" clearable filterable placeholder="按领取人筛选" @change="handleSearch">
-          <el-option v-for="c in claimerOptions" :key="c.name" :label="c.name" :value="c.name" />
-        </el-select>
-      </div>
-
-      <div class="flex flex-wrap gap-3 items-center justify-between pt-2 border-t border-gray-100">
-        <div class="flex items-center gap-2">
-          <span class="text-xs text-gray-500 font-medium">快捷筛选:</span>
-          <el-radio-group v-model="quickFilter" size="small" @change="handleQuickFilter">
-            <el-radio-button value="all">全部小鼠</el-radio-button>
-            <el-radio-button value="unclaimed">仅未领用 (待分配)</el-radio-button>
-            <el-radio-button value="claimed">仅已领用</el-radio-button>
-            <el-radio-button value="in_cage">当前在笼</el-radio-button>
-          </el-radio-group>
-        </div>
-
-        <div class="flex flex-wrap items-center gap-2">
-          <div class="mouse-sort-controls flex items-center gap-2" role="group" aria-label="小鼠列表排序">
-            <ArrowDownWideNarrow class="shrink-0 text-gray-500" :size="16" aria-hidden="true" />
-            <el-select v-model="sortBy" size="small" style="width: 140px" aria-label="排序方式" @change="handleSearch">
-              <el-option v-for="option in mouseSortOptions" :key="option.value" :label="option.label" :value="option.value" />
-            </el-select>
-            <el-select v-model="sortOrder" size="small" style="width: 85px" aria-label="排序方向" @change="handleSearch">
-              <el-option label="升序" value="asc" />
-              <el-option label="降序" value="desc" />
-            </el-select>
-          </div>
-          <el-button @click="resetFilters" size="small">重置筛选</el-button>
-          <el-button type="primary" size="small" @click="handleSearch">查询</el-button>
-        </div>
-      </div>
+    <div class="mouse-search-bar mb-4">
+      <el-input
+        v-model="filters.keyword"
+        placeholder="搜索耳标、品系、基因型或备注"
+        clearable
+        prefix-icon="Search"
+        @keyup.enter="handleSearch"
+        @clear="handleSearch"
+      />
     </div>
 
     <!-- Action Bar -->
@@ -130,7 +68,7 @@
 
     <!-- Mice Table -->
     <div v-if="authStore.isAdmin" class="text-xs text-gray-500 mb-2" role="status">
-      {{ gridSaving ? '正在保存小鼠资料…' : fillDrag ? `松开鼠标，将填充 ${Math.abs(fillDrag.endIndex - fillDrag.startIndex)} 只小鼠` : '点击品系、性别、出生日期、父母系谱、领取人、状态、领用用途或备注直接编辑，修改后自动保存。保存后拖动右下角蓝色方块可填充当前页同列，覆盖原值；Esc 取消编辑或拖动。编辑时保持行位置，查询或翻页后刷新筛选。' }}
+      {{ gridSaving ? '正在保存小鼠资料…' : fillDrag ? `松开鼠标，将填充 ${Math.abs(fillDrag.endIndex - fillDrag.startIndex)} 只小鼠` : '点击列标题可筛选、排序；点击资料格直接编辑，修改后自动保存。保存后拖动右下角蓝色方块可填充当前页同列，覆盖原值；Esc 取消编辑或拖动。编辑时保持行位置，查询或翻页后刷新筛选。' }}
     </div>
     <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
       <el-table
@@ -144,6 +82,9 @@
         <el-table-column type="selection" width="45" />
 
         <el-table-column prop="mouse_code" label="耳标 / 编号" width="140" fixed>
+          <template #header>
+            <MouseColumnHeader v-bind="columnMenuProps('mouse_code', '耳标 / 编号')" v-on="columnMenuEvents('mouse_code')" />
+          </template>
           <template #default="{ row }">
             <div
               class="inline-flex items-center cursor-pointer text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2 py-1 rounded transition-colors group"
@@ -158,6 +99,9 @@
         </el-table-column>
 
         <el-table-column v-for="column in mouseInfoColumns" :key="column.field" :prop="column.field" :label="column.label" :min-width="column.width">
+          <template #header>
+            <MouseColumnHeader v-bind="columnMenuProps(column.field, column.label)" v-on="columnMenuEvents(column.field)" />
+          </template>
           <template #default="{ row, $index }">
             <GenotypeGridCell v-bind="gridCellProps(row, column.field, $index)" v-on="gridCellEvents(row, column.field, $index)">
               <template v-if="column.field === 'strain'">
@@ -179,6 +123,9 @@
 
         <!-- Direct Genotype Linkage Column -->
         <el-table-column label="基因鉴定结果" min-width="150">
+          <template #header>
+            <MouseColumnHeader v-bind="columnMenuProps('genotype_1', '基因鉴定结果')" v-on="columnMenuEvents('genotype_1')" />
+          </template>
           <template #default="{ row }">
             <div v-if="row.genotypes && row.genotypes.length > 0" class="flex items-center gap-1">
               <el-tag
@@ -200,6 +147,9 @@
         </el-table-column>
 
         <el-table-column label="当前笼位与鼠房" min-width="160">
+          <template #header>
+            <MouseColumnHeader v-bind="columnMenuProps('cage_code', '当前笼位与鼠房')" v-on="columnMenuEvents('cage_code')" />
+          </template>
           <template #default="{ row }">
             <div v-if="row.cage_code" class="flex items-center gap-1.5">
               <el-tag size="small" effect="plain" type="info">{{ row.cage_room }}</el-tag>
@@ -226,6 +176,9 @@
 
         <!-- Core Linkage Column: Owner / Claimer -->
         <el-table-column label="当前领取人" min-width="165">
+          <template #header>
+            <MouseColumnHeader v-bind="columnMenuProps('owner_name', '当前领取人')" v-on="columnMenuEvents('owner_name')" />
+          </template>
           <template #default="{ row, $index }">
             <GenotypeGridCell v-bind="gridCellProps(row, 'owner_name', $index)" v-on="gridCellEvents(row, 'owner_name', $index)">
               <div v-if="row.owner_name" class="flex items-center gap-1">
@@ -241,6 +194,9 @@
         </el-table-column>
 
         <el-table-column prop="status" label="状态" min-width="135">
+          <template #header>
+            <MouseColumnHeader v-bind="columnMenuProps('status', '状态')" v-on="columnMenuEvents('status')" />
+          </template>
           <template #default="{ row, $index }">
             <GenotypeGridCell v-bind="gridCellProps(row, 'status', $index)" v-on="gridCellEvents(row, 'status', $index)">
               <el-tag size="small" :type="getStatusType(row.status)">{{ mouseStatusLabel(row) }}</el-tag>
@@ -249,6 +205,9 @@
         </el-table-column>
 
         <el-table-column v-for="column in noteColumns" :key="column.field" :prop="column.field" :label="column.label" min-width="180">
+          <template #header>
+            <MouseColumnHeader v-bind="columnMenuProps(column.field, column.label)" v-on="columnMenuEvents(column.field)" />
+          </template>
           <template #default="{ row, $index }">
             <GenotypeGridCell v-bind="gridCellProps(row, column.field, $index)" v-on="gridCellEvents(row, column.field, $index)">
               <span class="text-xs text-gray-600 truncate" :title="row[column.field]">{{ row[column.field] || '-' }}</span>
@@ -533,7 +492,6 @@
 
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue'
-import { ArrowDownWideNarrow } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { miceApi, cagesApi, claimersApi, mouseStatusesApi, importExportApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
@@ -546,6 +504,7 @@ import { hasGenotypeResult, isClaimedOutOfCage, mouseStatusLabel, mouseGenotypeL
 import { generateSequentialMouseCodes } from '@/utils/mouseCodes'
 import PedigreeTags from '@/components/PedigreeTags.vue'
 import GenotypeGridCell from '@/components/GenotypeGridCell.vue'
+import MouseColumnHeader from '@/components/MouseColumnHeader.vue'
 import { useGridFill } from '@/composables/useGridFill'
 import { apiErrorMessage } from '@/utils/apiError'
 import { ElMessage } from 'element-plus'
@@ -575,16 +534,10 @@ const mouseInfoColumns = [
 ]
 const noteColumns = [{ field: 'claim_purpose', label: '领用用途' }, { field: 'notes', label: '备注' }]
 
-const mouseSortOptions = [
-  { value: 'added', label: '录入顺序' },
-  { value: 'mouse_code', label: '耳标编号' },
-  { value: 'dob', label: '出生日期' },
-  { value: 'strain', label: '品系' },
-  { value: 'status', label: '状态' },
-]
+const mouseSortFields = ['added', 'mouse_code', 'dob', 'strain', 'gender', 'parents', 'genotype_1', 'cage_code', 'owner_name', 'status', 'claim_purpose', 'notes']
 const savedSortBy = localStorage.getItem('mice_sort_by')
 const savedSortOrder = localStorage.getItem('mice_sort_order')
-const sortBy = ref(mouseSortOptions.some(option => option.value === savedSortBy) ? savedSortBy : 'added')
+const sortBy = ref(mouseSortFields.includes(savedSortBy) ? savedSortBy : 'added')
 const sortOrder = ref(['asc', 'desc'].includes(savedSortOrder) ? savedSortOrder : 'desc')
 watch([sortBy, sortOrder], ([by, order]) => {
   localStorage.setItem('mice_sort_by', by)
@@ -595,18 +548,26 @@ const roomOptions = ref([])
 const strainOptions = ref([])
 const parentOptions = ref([])
 const claimerOptions = ref([])
-const quickFilter = ref('all')
-
-const filters = reactive({
+const emptyFilters = {
   keyword: '',
+  mouse_code: '',
   room: '',
+  cage_code: '',
   strain: '',
   parents: [],
   gender: '',
   owner_name: '',
   status: '',
-  has_owner: null
-})
+  has_owner: null,
+  in_cage: null,
+  dob_from: '',
+  dob_to: '',
+  genotype: '',
+  test_status: '',
+  claim_purpose: '',
+  notes: '',
+}
+const filters = reactive({ ...emptyFilters, parents: [] })
 
 // Dialog States
 const showSetOwnerDialog = ref(false)
@@ -671,6 +632,67 @@ const mouseForm = reactive({
 })
 
 const ALL_STATUSES = ref([])
+
+const columnControls = computed(() => {
+  const options = values => values.map(value => ({ value, label: value }))
+  return {
+    mouse_code: [{ key: 'mouse_code', label: '耳标编号', placeholder: '输入完整耳标编号' }],
+    strain: [{ key: 'strain', label: '品系', type: 'select', options: options(strainOptions.value) }],
+    gender: [{ key: 'gender', label: '性别', type: 'select', options: gridOptions.value.gender }],
+    dob: [{ key: 'dob_from', label: '出生日期起始', type: 'date' }, { key: 'dob_to', label: '出生日期截止', type: 'date' }],
+    parents: [{ key: 'parents', label: '亲本编号', type: 'select', multiple: true,
+      options: parentOptions.value.map(value => ({ value, label: parentOptionLabel(value) })) }],
+    genotype_1: [
+      { key: 'genotype', label: '鉴定结果', placeholder: '输入结果关键词' },
+      { key: 'test_status', label: '鉴定状态', type: 'select', options: [{ value: 'pending', label: '待鉴定' }, { value: 'tested', label: '已鉴定' }] },
+    ],
+    cage_code: [
+      { key: 'room', label: '鼠房', type: 'select', options: options(roomOptions.value) },
+      { key: 'cage_code', label: '笼号', placeholder: '输入完整笼号' },
+      { key: 'in_cage', label: '入笼情况', type: 'select', options: [{ value: true, label: '已入笼' }, { value: false, label: '未入笼' }] },
+    ],
+    owner_name: [
+      { key: 'owner_name', label: '领取人', type: 'select', options: options(claimerOptions.value.map(item => item.name)) },
+      { key: 'has_owner', label: '领用情况', type: 'select', options: [{ value: false, label: '未领用（待分配）' }, { value: true, label: '已领用' }] },
+    ],
+    status: [{ key: 'status', label: '状态', type: 'select', options: ALL_STATUSES.value }],
+    claim_purpose: [{ key: 'claim_purpose', label: '领用用途', placeholder: '输入用途关键词' }],
+    notes: [{ key: 'notes', label: '备注', placeholder: '输入备注关键词' }],
+  }
+})
+
+function hasFilterValue(value) {
+  return Array.isArray(value) ? value.length > 0 : value !== null && value !== undefined && value !== ''
+}
+
+function columnMenuProps(field, label) {
+  const controls = columnControls.value[field]
+  const modelValue = Object.fromEntries(controls.map(control => [control.key, filters[control.key]]))
+  return {
+    label, controls, modelValue,
+    filtered: Object.values(modelValue).some(hasFilterValue),
+    anyFiltered: Object.values(filters).some(hasFilterValue),
+    sortOrder: sortBy.value === field ? sortOrder.value : '',
+  }
+}
+
+function columnMenuEvents(field) {
+  return {
+    filter: values => {
+      if (values.dob_from && values.dob_to && values.dob_from > values.dob_to) {
+        ElMessage.warning('出生日期起始不能晚于截止日期')
+        return
+      }
+      for (const control of columnControls.value[field]) {
+        filters[control.key] = values[control.key] ?? (control.multiple ? [] : emptyFilters[control.key])
+      }
+      handleSearch()
+    },
+    sort: order => { sortBy.value = field; sortOrder.value = order; handleSearch() },
+    'reset-sort': () => { sortBy.value = 'added'; sortOrder.value = 'desc'; handleSearch() },
+    'reset-filters': resetFilters,
+  }
+}
 
 const gridOptions = computed(() => ({
   strain: [...new Set([...strainOptions.value, ...miceList.value.map(row => row.strain).filter(Boolean)])],
@@ -793,13 +815,22 @@ async function loadMice() {
       sort_by: sortBy.value,
       sort_order: sortOrder.value,
       keyword: filters.keyword || undefined,
+      mouse_code: filters.mouse_code || undefined,
       room: filters.room || undefined,
+      cage_code: filters.cage_code || undefined,
       strain: filters.strain || undefined,
       parents: filters.parents.length ? filters.parents.join(',') : undefined,
       gender: filters.gender || undefined,
       owner_name: filters.owner_name || undefined,
       status: filters.status || undefined,
-      has_owner: filters.has_owner
+      has_owner: filters.has_owner,
+      in_cage: filters.in_cage,
+      dob_from: filters.dob_from || undefined,
+      dob_to: filters.dob_to || undefined,
+      genotype: filters.genotype || undefined,
+      test_status: filters.test_status || undefined,
+      claim_purpose: filters.claim_purpose || undefined,
+      notes: filters.notes || undefined,
     }
     const res = await miceApi.listMice(params)
     if (requestId !== loadRequestId) return
@@ -818,15 +849,7 @@ function handleSearch() {
 }
 
 function resetFilters() {
-  filters.keyword = ''
-  filters.room = ''
-  filters.strain = ''
-  filters.parents = []
-  filters.gender = ''
-  filters.owner_name = ''
-  filters.status = ''
-  filters.has_owner = null
-  quickFilter.value = 'all'
+  Object.assign(filters, emptyFilters, { parents: [] })
   handleSearch()
 }
 
@@ -834,23 +857,6 @@ function parentOptionLabel(parent) {
   if (/M$/i.test(parent)) return `♂ ${parent.slice(0, -1)}`
   if (/F$/i.test(parent)) return `♀ ${parent.slice(0, -1)}`
   return parent
-}
-
-function handleQuickFilter(val) {
-  if (val === 'unclaimed') {
-    filters.has_owner = false
-    filters.status = ''
-  } else if (val === 'claimed') {
-    filters.has_owner = true
-    filters.status = ''
-  } else if (val === 'in_cage') {
-    filters.has_owner = null
-    filters.status = '在笼'
-  } else {
-    filters.has_owner = null
-    filters.status = ''
-  }
-  handleSearch()
 }
 
 function handleSelectionChange(val) {
@@ -1032,14 +1038,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.mouse-filter-grid {
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  align-items: start;
-}
-
-.mouse-filter-grid :deep(.el-input) {
-  height: 32px;
-}
+.mouse-search-bar { max-width: 420px; }
 
 .parent-reference:hover {
   box-shadow: 0 0 0 2px #d8b4fe;
