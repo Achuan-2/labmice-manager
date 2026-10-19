@@ -9,10 +9,6 @@
       </div>
 
       <div class="genotype-filters flex w-full items-center gap-3">
-        <el-select v-model="filters.test_status" placeholder="全部鉴定状态" clearable style="width: 150px" @change="searchGenotypes">
-          <el-option label="待鉴定" value="pending" />
-          <el-option label="已鉴定" value="tested" />
-        </el-select>
         <el-input
           v-model="filters.keyword"
           placeholder="搜索耳标、品系、父母系谱"
@@ -22,6 +18,13 @@
           @keyup.enter="searchGenotypes"
           @clear="searchGenotypes"
         />
+        <div class="flex items-center gap-2" role="group" aria-label="鉴定状态筛选">
+          <Funnel class="shrink-0 text-gray-500" :size="16" aria-hidden="true" />
+          <el-select v-model="filters.test_status" placeholder="全部鉴定状态" clearable style="width: 150px" aria-label="鉴定状态" @change="searchGenotypes">
+            <el-option label="待鉴定" value="pending" />
+            <el-option label="已鉴定" value="tested" />
+          </el-select>
+        </div>
 
         <el-button type="primary" @click="searchGenotypes">查询</el-button>
 
@@ -283,7 +286,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
-import { ArrowDownWideNarrow } from 'lucide-vue-next'
+import { ArrowDownWideNarrow, Funnel } from 'lucide-vue-next'
 import { genotypesApi, miceApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import MouseDetailModal from '@/components/MouseDetailModal.vue'
