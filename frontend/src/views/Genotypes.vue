@@ -199,8 +199,9 @@
         </div>
         <div v-if="!isEdit && existingEntries.length" class="mb-4">
           <el-alert
-            :title="createNewMouse ? '以下编号已存在，新增小鼠时将自动更名' : testedEntries.length ? '以下小鼠已经有基因鉴定结果' : pendingEntries.length ? '以下小鼠已经登记待检验' : '以下编号已有小鼠档案，将关联原小鼠'"
-            :description="createNewMouse ? '将创建另一只小鼠，不会覆盖原小鼠的档案和鉴定记录。' : '请先核对已有记录；已有鉴定信息时，保存需确认再次登记。'"
+            v-if="entryWarning"
+            :title="entryWarning"
+            :description="createNewMouse ? '将创建另一只小鼠，不会覆盖原小鼠的档案和鉴定记录。' : undefined"
             type="warning"
             :closable="false"
             show-icon
@@ -238,22 +239,22 @@
           <el-input v-model="form.parents" placeholder="如 E925M+E822F、E824F" @input="manualFields.add('parents')" />
         </el-form-item>
         <el-form-item label="鉴定日期">
-          <el-date-picker v-model="form.test_date" type="date" value-format="YYYY-MM-DD" placeholder="选择鉴定日期" style="width: 100%" />
+          <el-date-picker v-model="form.test_date" type="date" value-format="YYYY-MM-DD" placeholder="选择鉴定日期" style="width: 100%" @change="manualFields.add('test_date')" />
         </el-form-item>
         <el-form-item label="Genotype 1">
-          <el-input v-model="form.genotype_1" placeholder="选填，如 阳性、野生型、杂合子、纯合子、HET" />
+          <el-input v-model="form.genotype_1" placeholder="选填，如 阳性、野生型、杂合子、纯合子、HET" @input="manualFields.add('genotype_1')" />
         </el-form-item>
         <el-form-item label="Genotype 2">
-          <el-input v-model="form.genotype_2" placeholder="第二基因型结果 (选填)" />
+          <el-input v-model="form.genotype_2" placeholder="第二基因型结果 (选填)" @input="manualFields.add('genotype_2')" />
         </el-form-item>
         <el-form-item label="Genotype 3">
-          <el-input v-model="form.genotype_3" placeholder="第三基因型结果 (选填)" />
+          <el-input v-model="form.genotype_3" placeholder="第三基因型结果 (选填)" @input="manualFields.add('genotype_3')" />
         </el-form-item>
         <el-form-item label="操作人/记录">
-          <el-input v-model="form.op_record" placeholder="操作人员简记" />
+          <el-input v-model="form.op_record" placeholder="操作人员简记" @input="manualFields.add('op_record')" />
         </el-form-item>
         <el-form-item label="备注">
-          <el-input v-model="form.notes" type="textarea" :rows="2" placeholder="备注信息" />
+          <el-input v-model="form.notes" type="textarea" :rows="2" placeholder="备注信息" @input="manualFields.add('notes')" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -294,6 +295,7 @@ const pageSize = ref(50)
 const optionsLoading = ref(false)
 const genotypeOptions = reactive({ genotype_1: [], genotype_2: [], genotype_3: [] })
 const genotypeFields = ['genotype_1', 'genotype_2', 'genotype_3']
+const genotypeLookupFields = ['test_date', ...genotypeFields, 'op_record', 'notes']
 const genotypeSortOptions = [
   { value: 'added_desc', label: '添加顺序：倒序', sortBy: 'added', sortOrder: 'desc' },
   { value: 'added_asc', label: '添加顺序：正序', sortBy: 'added', sortOrder: 'asc' },
@@ -339,6 +341,12 @@ const testedEntries = computed(() => entryChecks.value.filter(entry => entry.tes
 const pendingEntries = computed(() => entryChecks.value.filter(entry => entry.pending_count))
 const existingArchiveEntries = computed(() => entryChecks.value.filter(entry => entry.mouse_id))
 const existingEntries = computed(() => entryChecks.value.filter(entry => entry.mouse_id || entry.tested_records.length || entry.pending_count))
+const entryWarning = computed(() => {
+  if (createNewMouse.value && existingEntries.value.length) return '以下编号已存在，新增小鼠时将自动更名'
+  if (testedEntries.value.length) return '已有鉴定信息，保存需确认再次登记。'
+  if (pendingEntries.value.length) return '已有待检验记录，保存需确认再次登记。'
+  return ''
+})
 const existingResultRows = computed(() => testedEntries.value.flatMap(entry => (
   entry.tested_records.map(record => ({ ...record, mouse_code: entry.mouse_code }))
 )))
@@ -393,7 +401,7 @@ watch(() => [form.mouse_code, showDialog.value, lookupRetry.value, createNewMous
   lookupError.value = ''
   entryChecks.value = []
   if (!visible || isEdit.value) return
-  for (const field of ['strain', 'parents', 'gender', 'dob']) {
+  for (const field of ['strain', 'parents', 'gender', 'dob', ...genotypeLookupFields]) {
     if (!manualFields.has(field)) form[field] = ''
   }
   const codes = parseCodes(value)
@@ -413,6 +421,14 @@ watch(() => [form.mouse_code, showDialog.value, lookupRetry.value, createNewMous
         const values = entries.map(entry => field === 'gender'
           ? (['M', 'F'].includes(entry.gender) ? entry.gender : '')
           : entry[field] || '')
+        if (!manualFields.has(field)) {
+          form[field] = values.every(value => value === values[0]) ? values[0] : ''
+        }
+      }
+      // Use the latest tested record; batch entry only inherits shared values.
+      const latestResults = entries.map(entry => entry.tested_records[0] || {})
+      for (const field of genotypeLookupFields) {
+        const values = latestResults.map(record => record[field] || '')
         if (!manualFields.has(field)) {
           form[field] = values.every(value => value === values[0]) ? values[0] : ''
         }

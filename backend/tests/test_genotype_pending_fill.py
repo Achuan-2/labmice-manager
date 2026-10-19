@@ -107,6 +107,7 @@ class GenotypePendingFillTests(unittest.TestCase):
     def test_entry_check_shows_h515_results_even_with_newer_pending_history(self):
         self.client.post("/api/genotypes", json={
             "mouse_code": "H515", "test_date": "2026-09-01", "genotype_1": "HET", "genotype_2": "WT",
+            "op_record": "原鉴定人", "notes": "原鉴定备注",
         })
         response = self.client.post("/api/genotypes", json={"mouse_code": "H515", "test_date": "2099-01-01", "confirm_existing": True})
         self.assertEqual(response.status_code, 200, response.text)
@@ -114,6 +115,7 @@ class GenotypePendingFillTests(unittest.TestCase):
         self.assertEqual(entry["mouse_code"], "H515")
         self.assertEqual(entry["tested_records"], [{
             "test_date": "2026-09-01", "genotype_1": "HET", "genotype_2": "WT", "genotype_3": None,
+            "op_record": "原鉴定人", "notes": "原鉴定备注",
         }])
         self.assertEqual(entry["pending_count"], 1)
         with Session(self.engine) as db:

@@ -230,7 +230,9 @@ def check_genotype_entry(
             "tested_records": [
                 {
                     "test_date": record.test_date,
-                    **{field: getattr(record, field, None) for field in ("genotype_1", "genotype_2", "genotype_3")},
+                    **{field: getattr(record, field, None) for field in (
+                        "genotype_1", "genotype_2", "genotype_3", "op_record", "notes",
+                    )},
                 }
                 for record in tested
             ],
