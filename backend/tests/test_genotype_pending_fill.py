@@ -11,6 +11,7 @@ from backend.app.auth import require_admin, require_auth
 from backend.app.database import Base, get_db
 from backend.app.models.models import GenotypeRecord, Mouse, User
 from backend.app.routers.genotypes import router
+from backend.app.routers.transfers import router as transfers_router
 
 
 class GenotypePendingFillTests(unittest.TestCase):
@@ -24,6 +25,7 @@ class GenotypePendingFillTests(unittest.TestCase):
             db.commit()
         self.app = FastAPI()
         self.app.include_router(router)
+        self.app.include_router(transfers_router)
 
         def test_db():
             with Session(self.engine, autoflush=False) as db:
@@ -39,9 +41,9 @@ class GenotypePendingFillTests(unittest.TestCase):
         self.client.close()
         self.engine.dispose()
 
-    def register(self):
+    def register(self, **extra):
         response = self.client.post("/api/genotypes/batch", json=[
-            {"mouse_code": f"H{i}", "notes": f"备注{i}"} for i in range(489, 493)
+            {"mouse_code": f"H{i}", "notes": f"备注{i}", **extra} for i in range(489, 493)
         ])
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
@@ -59,11 +61,55 @@ class GenotypePendingFillTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
 
+    def test_new_entry_creates_archive_and_is_visible_in_change_log_api(self):
+        response = self.client.post("/api/genotypes", json={"mouse_code": "New1"})
+        self.assertEqual(response.status_code, 200, response.text)
+        record = response.json()
+        self.assertTrue(record["mouse_created"])
+        self.assertIsNotNone(record["mouse_id"])
+        self.assertIsNone(record["renamed_from"])
+        self.assertIsNone(record["test_date"])
+        logs = self.client.get("/api/transfers", params={"action_type": "新增小鼠"}).json()
+        self.assertEqual(logs["total"], 1)
+        self.assertEqual((logs["items"][0]["mouse_codes"], logs["items"][0]["operator"]), ("New1", "测试管理员"))
+        entry, = self.check_entries("New1")
+        self.assertEqual(entry["mouse_id"], record["mouse_id"])
+        self.assertEqual(entry["pending_count"], 1)
+
+    def test_new_mouse_mode_returns_renamed_code_and_logs_the_same_code(self):
+        response = self.client.post("/api/genotypes/batch", json=[{
+            "mouse_code": "H489", "create_new_mouse": True, "genotype_1": "HET",
+        }])
+        self.assertEqual(response.status_code, 200, response.text)
+        record, = response.json()
+        self.assertEqual((record["mouse_code"], record["renamed_from"], record["mouse_created"]), ("H489_2", "H489", True))
+        logs = self.client.get("/api/transfers", params={"action_type": "新增小鼠"}).json()
+        self.assertEqual(logs["items"][0]["mouse_codes"], "H489_2")
+        with Session(self.engine) as db:
+            self.assertIsNone(db.query(Mouse).filter_by(mouse_code="H489").one().genotype_1)
+            self.assertEqual(db.get(Mouse, record["mouse_id"]).genotype_1, "HET")
+
+    def test_duplicate_existing_entry_rejects_entire_batch_until_confirmed(self):
+        self.register()
+        response = self.client.post("/api/genotypes/batch", json=[
+            {"mouse_code": "New1"}, {"mouse_code": "H489"},
+        ])
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(self.client.get("/api/transfers").json()["total"], 0)
+        with Session(self.engine) as db:
+            self.assertEqual(db.query(Mouse).count(), 4)
+            self.assertEqual(db.query(GenotypeRecord).count(), 4)
+        response = self.client.post("/api/genotypes", json={"mouse_code": "H489", "confirm_existing": True})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(response.json()["mouse_created"])
+        self.assertEqual(response.json()["mouse_code"], "H489")
+
     def test_entry_check_shows_h515_results_even_with_newer_pending_history(self):
         self.client.post("/api/genotypes", json={
             "mouse_code": "H515", "test_date": "2026-09-01", "genotype_1": "HET", "genotype_2": "WT",
         })
-        self.client.post("/api/genotypes", json={"mouse_code": "H515", "test_date": "2099-01-01"})
+        response = self.client.post("/api/genotypes", json={"mouse_code": "H515", "test_date": "2099-01-01", "confirm_existing": True})
+        self.assertEqual(response.status_code, 200, response.text)
         entry, = self.check_entries(" H515 ")
         self.assertEqual(entry["mouse_code"], "H515")
         self.assertEqual(entry["tested_records"], [{
@@ -72,7 +118,7 @@ class GenotypePendingFillTests(unittest.TestCase):
         self.assertEqual(entry["pending_count"], 1)
         with Session(self.engine) as db:
             self.assertEqual(db.query(GenotypeRecord).count(), 2)
-            self.assertIsNone(db.query(Mouse).filter_by(mouse_code="H515").first())
+            self.assertIsNotNone(db.query(Mouse).filter_by(mouse_code="H515").first())
 
     def test_entry_check_includes_archive_only_results_and_basic_fields(self):
         with Session(self.engine) as db:
@@ -176,7 +222,7 @@ class GenotypePendingFillTests(unittest.TestCase):
             mouse = db.query(Mouse).filter_by(mouse_code="H489").one()
             mouse.genotype_1, mouse.test_date = "WT", "2026-09-01"
             db.commit()
-        record = self.register()[0]
+        record = self.register(confirm_existing=True)[0]
         self.client.put(f'/api/genotypes/{record["id"]}', json={"notes": "待检验备注"})
         self.fill([record["id"]], "待测")
         self.client.delete(f'/api/genotypes/{record["id"]}')
@@ -187,7 +233,8 @@ class GenotypePendingFillTests(unittest.TestCase):
     def test_newer_pending_record_does_not_hide_previous_test_result(self):
         records = self.register()
         self.fill([records[0]["id"]], "WT")
-        self.client.post("/api/genotypes", json={"mouse_code": "H489", "test_date": "2099-01-01"})
+        response = self.client.post("/api/genotypes", json={"mouse_code": "H489", "test_date": "2099-01-01", "confirm_existing": True})
+        self.assertEqual(response.status_code, 200, response.text)
         self.fill([records[0]["id"]], "HET")
         with Session(self.engine) as db:
             self.assertEqual(db.query(Mouse).filter_by(mouse_code="H489").one().genotype_1, "HET")

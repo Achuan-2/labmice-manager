@@ -58,7 +58,7 @@ class MouseCodeAutoRenameTests(unittest.TestCase):
         self.assertEqual((log.action_type, log.mouse_codes, log.mouse_count), ("新增小鼠", "X100_3, X101", 2))
         self.assertEqual((log.target_room, log.target_cage), ("东四105", "F4"))
         self.assertEqual(
-            [item.mouse_codes for item in list_transfers(action_type="新增小鼠", limit=100, db=self.db, current_user=self.admin)],
+            [item.mouse_codes for item in list_transfers(action_type="新增小鼠", page=1, page_size=100, db=self.db, current_user=self.admin)["items"]],
             ["X100_3, X101"],
         )
 

@@ -160,9 +160,18 @@
 
     <!-- Add/Edit Genotype Dialog -->
     <el-dialog v-model="showDialog" class="genotype-entry-dialog" :title="isEdit ? '编辑基因鉴定记录' : '录入鉴定结果'" width="540px" align-center>
-      <div v-if="!isEdit" class="text-xs text-gray-500 mb-4">基因型结果和鉴定日期均可留空；结果留空时保存为待检验，检验后可在表格补充并向下填充。</div>
+      <div v-if="!isEdit" class="text-xs text-gray-500 mb-4">新编号会同步创建小鼠档案并记录变动日志。基因型结果和鉴定日期均可留空；结果留空时保存为待检验。</div>
       <el-form :model="form" label-width="110px" class="genotype-form" :disabled="saving">
         <template v-if="!isEdit">
+          <el-form-item label="录入方式">
+            <el-radio-group v-model="createNewMouse">
+              <el-radio :value="false">关联原小鼠</el-radio>
+              <el-radio :value="true">新增小鼠</el-radio>
+            </el-radio-group>
+            <div class="text-xs text-gray-500 mt-1">
+              {{ createNewMouse ? '始终新增小鼠；重复编号自动添加 _2、_3 等后缀，保存后显示实际编号。' : '已有编号关联原小鼠，新编号自动新增小鼠档案。' }}
+            </div>
+          </el-form-item>
           <el-form-item label="新增数量" required>
             <el-input-number v-model="addCount" :min="1" :max="500" @change="updateGeneratedMouseCodes" />
           </el-form-item>
@@ -178,6 +187,7 @@
               placeholder="自动生成后仍可手动调整，多个编号用中英文逗号、顿号或换行分隔"
             />
             <div class="text-xs text-gray-500 mt-1">{{ lookupLoading ? '正在查询小鼠档案和已有鉴定信息…' : '每个编号分别建立鉴定记录；品系、系谱留空时沿用各自档案。' }}</div>
+            <div v-if="duplicateCodes.length" class="text-xs text-red-600 mt-1">编号列表中有重复项：{{ duplicateCodes.join('、') }}，请修改后再保存。</div>
           </el-form-item>
         </template>
         <el-form-item v-else label="耳标编号" required>
@@ -189,12 +199,13 @@
         </div>
         <div v-if="!isEdit && existingEntries.length" class="mb-4">
           <el-alert
-            :title="testedEntries.length ? '以下小鼠已经有基因鉴定结果' : '以下小鼠已经登记待检验'"
-            description="请先核对已有记录；如确需再次登记，保存时需确认继续。"
+            :title="createNewMouse ? '以下编号已存在，新增小鼠时将自动更名' : testedEntries.length ? '以下小鼠已经有基因鉴定结果' : pendingEntries.length ? '以下小鼠已经登记待检验' : '以下编号已有小鼠档案，将关联原小鼠'"
+            :description="createNewMouse ? '将创建另一只小鼠，不会覆盖原小鼠的档案和鉴定记录。' : '请先核对已有记录；已有鉴定信息时，保存需确认再次登记。'"
             type="warning"
             :closable="false"
             show-icon
           />
+          <div v-if="existingArchiveEntries.length" class="text-xs text-gray-500 mt-2">已有小鼠档案：{{ existingArchiveEntries.map(entry => entry.mouse_code).join('、') }}</div>
           <el-table v-if="existingResultRows.length" :data="existingResultRows" size="small" max-height="240" class="mt-2" border>
             <el-table-column prop="mouse_code" label="耳标编号" min-width="90" />
             <el-table-column prop="test_date" label="鉴定日期" min-width="105">
@@ -204,7 +215,7 @@
               <template #default="{ row }">{{ row[field] || '—' }}</template>
             </el-table-column>
           </el-table>
-          <div v-if="pendingEntries.length" class="text-xs text-amber-700 mt-2">
+          <div v-if="pendingEntries.length && !createNewMouse" class="text-xs text-amber-700 mt-2">
             已有待检验记录：{{ pendingEntries.map(entry => `${entry.mouse_code}（${entry.pending_count} 条）`).join('、') }}。建议在原记录填写结果，避免重复登记。
           </div>
         </div>
@@ -218,7 +229,7 @@
         </el-form-item>
         <el-form-item label="性别">
           <el-radio-group v-model="form.gender" @change="manualFields.add('gender')">
-            <el-radio value="">沿用档案</el-radio>
+            <el-radio value="">{{ createNewMouse ? '未知' : '沿用档案' }}</el-radio>
             <el-radio value="M">雄 (M)</el-radio>
             <el-radio value="F">雌 (F)</el-radio>
           </el-radio-group>
@@ -247,7 +258,7 @@
       </el-form>
       <template #footer>
         <el-button :disabled="saving" @click="showDialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" :disabled="lookupLoading || Boolean(lookupError)" @click="submitForm">保存记录</el-button>
+        <el-button type="primary" :loading="saving" :disabled="lookupLoading || Boolean(lookupError) || duplicateCodes.length > 0" @click="submitForm">保存记录</el-button>
       </template>
     </el-dialog>
 
@@ -323,9 +334,11 @@ const lookupLoading = ref(false)
 const lookupError = ref('')
 const lookupRetry = ref(0)
 const entryChecks = ref([])
+const createNewMouse = ref(false)
 const testedEntries = computed(() => entryChecks.value.filter(entry => entry.tested_records.length))
 const pendingEntries = computed(() => entryChecks.value.filter(entry => entry.pending_count))
-const existingEntries = computed(() => entryChecks.value.filter(entry => entry.tested_records.length || entry.pending_count))
+const existingArchiveEntries = computed(() => entryChecks.value.filter(entry => entry.mouse_id))
+const existingEntries = computed(() => entryChecks.value.filter(entry => entry.mouse_id || entry.tested_records.length || entry.pending_count))
 const existingResultRows = computed(() => testedEntries.value.flatMap(entry => (
   entry.tested_records.map(record => ({ ...record, mouse_code: entry.mouse_code }))
 )))
@@ -348,8 +361,17 @@ const form = reactive({
 })
 
 function parseCodes(value) {
-  return [...new Set(value.split(/[,，、\n]+/).map(code => code.trim()).filter(Boolean))]
+  return value.split(/[,，、\n]+/).map(code => code.trim()).filter(Boolean)
 }
+
+const duplicateCodes = computed(() => {
+  const seen = new Set()
+  return [...new Set(parseCodes(form.mouse_code).filter(code => {
+    if (seen.has(code)) return true
+    seen.add(code)
+    return false
+  }))]
+})
 
 const isBatchEntry = computed(() => (
   !isEdit.value && (addCount.value > 1 || parseCodes(form.mouse_code).length > 1)
@@ -366,7 +388,7 @@ function updateGeneratedMouseCodes() {
   form.mouse_code = generateSequentialMouseCodes(startCode.value, addCount.value).join(', ')
 }
 
-watch(() => [form.mouse_code, showDialog.value, lookupRetry.value], ([value, visible], _, onCleanup) => {
+watch(() => [form.mouse_code, showDialog.value, lookupRetry.value, createNewMouse.value], ([value, visible], _, onCleanup) => {
   lookupLoading.value = false
   lookupError.value = ''
   entryChecks.value = []
@@ -375,7 +397,7 @@ watch(() => [form.mouse_code, showDialog.value, lookupRetry.value], ([value, vis
     if (!manualFields.has(field)) form[field] = ''
   }
   const codes = parseCodes(value)
-  if (!codes.length || codes.length > 500) return
+  if (!codes.length || codes.length > 500 || duplicateCodes.value.length) return
   let cancelled = false
   lookupLoading.value = true
   const timer = setTimeout(async () => {
@@ -383,6 +405,7 @@ watch(() => [form.mouse_code, showDialog.value, lookupRetry.value], ([value, vis
       const entries = await genotypesApi.checkEntry(codes)
       if (cancelled) return
       entryChecks.value = entries
+      if (createNewMouse.value) return
       const lookupFields = codes.length > 1
         ? ['strain', 'parents', 'gender']
         : ['strain', 'parents', 'gender', 'dob']
@@ -548,6 +571,7 @@ function cancelFill() {
 onBeforeUnmount(cancelFill)
 
 function openAddDialog() {
+  createNewMouse.value = false
   manualFields.clear()
   isEdit.value = false
   currentEditId.value = null
@@ -570,6 +594,7 @@ function openAddDialog() {
 }
 
 function openEditDialog(row) {
+  createNewMouse.value = false
   isEdit.value = true
   currentEditId.value = row.id
   Object.assign(form, {
@@ -595,6 +620,10 @@ async function submitForm() {
     ElMessage.warning('请输入耳标编号')
     return
   }
+  if (duplicateCodes.value.length) {
+    ElMessage.warning(`编号列表中有重复项：${duplicateCodes.value.join('、')}，请修改后再保存`)
+    return
+  }
   if (codes.length > 500) {
     ElMessage.warning('每次最多录入 500 个耳标编号')
     return
@@ -607,7 +636,8 @@ async function submitForm() {
     } else {
       // Recheck on save so a newly added result cannot bypass the warning.
       entryChecks.value = await genotypesApi.checkEntry(codes)
-      if (existingEntries.value.length) {
+      let confirmExisting = false
+      if (!createNewMouse.value && (testedEntries.value.length || pendingEntries.value.length)) {
         const describeCodes = entries => {
           const codes = entries.slice(0, 10).map(entry => entry.mouse_code).join('、')
           return entries.length > 10 ? `${codes} 等 ${entries.length} 只小鼠` : codes
@@ -625,13 +655,22 @@ async function submitForm() {
             '请确认重复登记',
             { type: 'warning', confirmButtonText: '仍要登记', cancelButtonText: '返回核对' },
           )
+          confirmExisting = true
         } catch (error) {
           if (error === 'cancel' || error === 'close') return
           throw error
         }
       }
-      await genotypesApi.createGenotypes(codes.map(mouse_code => ({ ...form, mouse_code })))
-      ElMessage.success(`已录入 ${codes.length} 条鉴定记录`)
+      const records = await genotypesApi.createGenotypes(codes.map(mouse_code => ({
+        ...form, mouse_code, create_new_mouse: createNewMouse.value, confirm_existing: confirmExisting,
+      })))
+      const createdCount = records.filter(record => record.mouse_created).length
+      const renamed = records.filter(record => record.renamed_from)
+      let message = `已录入 ${records.length} 条鉴定记录${createdCount ? `，新增 ${createdCount} 只小鼠` : ''}`
+      if (renamed.length) {
+        message += `；重复编号已更名：${renamed.slice(0, 10).map(record => `${record.renamed_from} → ${record.mouse_code}`).join('、')}${renamed.length > 10 ? ` 等 ${renamed.length} 只` : ''}`
+      }
+      ElMessage.success(message)
     }
     showDialog.value = false
     loadGenotypes()

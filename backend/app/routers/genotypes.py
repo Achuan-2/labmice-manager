@@ -7,7 +7,8 @@ from sqlalchemy import case, func, or_
 from backend.app.database import get_db
 from backend.app.models.models import GenotypeRecord, Mouse, User
 from backend.app.schemas.schemas import (
-    GenotypeBatchFill, GenotypeEntryCheck, GenotypeRecordCreate, GenotypeRecordUpdate, GenotypeRecordResponse
+    GenotypeBatchFill, GenotypeEntryCheck, GenotypeRecordCreate, GenotypeRecordUpdate, GenotypeRecordResponse,
+    MouseCreate,
 )
 from backend.app.auth import require_auth, require_admin
 from backend.app.services.genotype_service import (
@@ -15,6 +16,7 @@ from backend.app.services.genotype_service import (
     next_genotype_entry_order,
     sync_mouse_genotype_summary as _sync_mouse_genotype_summary,
 )
+from backend.app.services.mouse_creation import create_mouse_in_session
 
 router = APIRouter(prefix="/api/genotypes", tags=["Genotypes"])
 
@@ -223,6 +225,7 @@ def check_genotype_entry(
         source = mouse or (records[0] if records else None)
         entries.append({
             "mouse_code": code,
+            "mouse_id": mouse.id if mouse else None,
             **{field: getattr(source, field, None) for field in ("strain", "parents", "gender", "dob")},
             "tested_records": [
                 {
@@ -244,49 +247,88 @@ def create_genotype_record(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
-    gt = _add_genotype_record(data, db, current_user)
-    db.commit()
+    try:
+        gt = _add_genotype_record(data, db, current_user)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(gt)
     return gt
 
 
-def _add_genotype_record(data, db, current_user):
+def _add_genotype_record(
+    data: GenotypeRecordCreate, db: Session, current_user: User, occupied_codes: Optional[set[str]] = None,
+) -> GenotypeRecord:
     clean_code = data.mouse_code.strip()
     if not clean_code or any(separator in clean_code for separator in (",", "，", "、", "\n")):
         raise HTTPException(status_code=422, detail="每条鉴定记录需提供一个有效耳标编号")
     mouse = db.query(Mouse).filter(Mouse.mouse_code == clean_code).first()
-    
+    if not data.create_new_mouse and not data.confirm_existing:
+        existing_record = db.query(GenotypeRecord.id).filter(GenotypeRecord.mouse_code == clean_code).first()
+        if existing_record or (mouse and has_genotype_result(mouse.genotype_1, mouse.genotype_2)):
+            raise HTTPException(status_code=409, detail=f"小鼠 [{clean_code}] 已有鉴定记录或结果，请核对并确认再次登记")
+
+    mouse_created = data.create_new_mouse or mouse is None
+    if mouse_created:
+        source = None
+        if not data.create_new_mouse:
+            source = db.query(GenotypeRecord).filter(GenotypeRecord.mouse_code == clean_code).order_by(
+                GenotypeRecord.test_date.desc(), GenotypeRecord.id.desc(),
+            ).first()
+        if data.create_new_mouse and occupied_codes is None:
+            occupied_codes = _occupied_mouse_codes(db)
+        mouse = create_mouse_in_session(MouseCreate(
+            mouse_code=clean_code,
+            strain=data.strain or (source.strain if source else ""),
+            dob=data.dob or (source.dob if source else None),
+            gender=data.gender or (source.gender if source else None),
+            parents=data.parents or (source.parents if source else None),
+            notes=data.notes,
+        ), db, current_user, occupied_codes=occupied_codes if data.create_new_mouse else None)
+        if occupied_codes is not None:
+            occupied_codes.add(mouse.mouse_code)
+
     gt = GenotypeRecord(
         entry_order=next_genotype_entry_order(db),
-        mouse_code=clean_code,
-        mouse_id=mouse.id if mouse else None,
+        mouse_code=mouse.mouse_code,
+        mouse_id=mouse.id,
         test_date=data.test_date or (
             datetime.date.today().isoformat()
             if has_genotype_result(data.genotype_1, data.genotype_2, data.genotype_3) else None
         ),
-        strain=data.strain or (mouse.strain if mouse else ""),
-        dob=data.dob or (mouse.dob if mouse else None),
-        gender=data.gender or (mouse.gender if mouse else None),
-        parents=data.parents or (mouse.parents if mouse else None),
+        strain=mouse.strain if mouse_created else data.strain or mouse.strain,
+        dob=data.dob or mouse.dob,
+        gender=data.gender or mouse.gender,
+        parents=mouse.parents if mouse_created else data.parents or mouse.parents,
         genotype_1=data.genotype_1,
         genotype_2=data.genotype_2,
         genotype_3=data.genotype_3,
         op_record=data.op_record or current_user.display_name or current_user.username,
         notes=data.notes
     )
+    # Response-only fields tell the caller which archives and codes were created.
+    gt.mouse_created = mouse_created
+    gt.renamed_from = clean_code if mouse.mouse_code != clean_code else None
     db.add(gt)
 
     # Sync to mouse record
-    if mouse:
-        if data.dob:
-            mouse.dob = data.dob
-        if data.gender and mouse.gender == "未知":
-            mouse.gender = data.gender
-        db.flush()
-        if has_genotype_result(gt.genotype_1, gt.genotype_2, gt.genotype_3):
-            _sync_mouse_genotype_summary(mouse, db)
+    if data.dob:
+        mouse.dob = data.dob
+    if data.gender and mouse.gender == "未知":
+        mouse.gender = data.gender
+    db.flush()
+    if mouse_created or has_genotype_result(gt.genotype_1, gt.genotype_2, gt.genotype_3):
+        _sync_mouse_genotype_summary(mouse, db)
 
     return gt
+
+
+def _occupied_mouse_codes(db: Session) -> set[str]:
+    """New animals must not inherit history belonging to an unarchived mouse."""
+    return {row[0] for row in db.query(Mouse.mouse_code).all()} | {
+        row[0] for row in db.query(GenotypeRecord.mouse_code).distinct().all()
+    }
 
 
 @router.post("/batch", response_model=List[GenotypeRecordResponse])
@@ -301,7 +343,8 @@ def create_genotype_records(
     if len(codes) != len(set(codes)):
         raise HTTPException(status_code=422, detail="耳标编号不能重复")
     try:
-        records = [_add_genotype_record(item, db, current_user) for item in data]
+        occupied_codes = _occupied_mouse_codes(db) if any(item.create_new_mouse for item in data) else None
+        records = [_add_genotype_record(item, db, current_user, occupied_codes) for item in data]
         db.commit()
     except Exception:
         db.rollback()

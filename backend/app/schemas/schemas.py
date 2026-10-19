@@ -52,7 +52,8 @@ class GenotypeRecordBase(BaseModel):
     notes: Optional[str] = None
 
 class GenotypeRecordCreate(GenotypeRecordBase):
-    pass
+    create_new_mouse: bool = False
+    confirm_existing: bool = False
 
 class GenotypeEntryCheck(BaseModel):
     mouse_codes: List[str] = Field(min_length=1, max_length=500)
@@ -76,6 +77,8 @@ class GenotypeBatchFill(BaseModel):
 
 class GenotypeRecordResponse(GenotypeRecordBase):
     id: int
+    mouse_created: bool = False
+    renamed_from: Optional[str] = None
     created_at: Optional[datetime] = None
 
     class Config:
