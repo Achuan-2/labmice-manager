@@ -58,6 +58,7 @@
 
         <div class="flex flex-wrap items-center gap-2">
           <div class="mouse-sort-controls flex items-center gap-2" role="group" aria-label="小鼠列表排序">
+            <el-icon class="shrink-0 text-gray-500" :size="16" aria-hidden="true"><Sort /></el-icon>
             <el-select v-model="sortBy" size="small" style="width: 140px" aria-label="排序方式" @change="handleSearch">
               <el-option v-for="option in mouseSortOptions" :key="option.value" :label="option.label" :value="option.value" />
             </el-select>

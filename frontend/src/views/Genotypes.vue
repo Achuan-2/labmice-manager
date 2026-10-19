@@ -29,6 +29,7 @@
           <el-icon class="mr-1"><Plus /></el-icon> 录入鉴定结果
         </el-button>
         <div class="ml-auto flex items-center gap-2" role="group" aria-label="基因鉴定结果排序">
+          <el-icon class="shrink-0 text-gray-500" :size="16" aria-hidden="true"><Sort /></el-icon>
           <el-select v-model="sortBy" size="small" style="width: 140px" aria-label="排序方式" @change="searchGenotypes">
             <el-option v-for="option in genotypeSortOptions" :key="option.value" :label="option.label" :value="option.value" />
           </el-select>
