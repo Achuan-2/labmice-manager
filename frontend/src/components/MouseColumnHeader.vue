@@ -16,10 +16,11 @@
         <Filter :size="16" />筛选<ChevronDown :size="14" class="trailing-icon" />
       </button>
       <form v-if="showFilter" class="column-filter-form" @submit.prevent="applyFilter">
-        <div v-for="control in controls" :key="control.key" class="column-filter-control" :class="{ 'is-number': control.type === 'number' }">
+        <div v-for="control in controls" :key="control.key" class="column-filter-control" :class="{ 'is-inline': control.inline }">
           <span>{{ control.label }}</span>
           <el-select v-if="control.type === 'select'" v-model="draft[control.key]" :multiple="control.multiple"
-            filterable clearable :teleported="false" :reserve-keyword="false" :placeholder="control.placeholder || '全部'" :aria-label="control.label">
+            :filterable="control.filterable !== false" :clearable="control.clearable !== false" :teleported="false"
+            :reserve-keyword="false" :placeholder="control.placeholder || '全部'" :aria-label="control.label">
             <el-option v-for="option in control.options" :key="String(option.value)" :value="option.value" :label="option.label" />
           </el-select>
           <el-date-picker v-else-if="control.type === 'date'" v-model="draft[control.key]" type="date"
@@ -136,7 +137,7 @@ function resetFilters() {
 .column-menu-divider { margin: 6px 0; border-top: 1px solid var(--el-border-color-lighter); }
 .column-filter-form { padding: 8px 10px; }
 .column-filter-control { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; font-size: 12px; }
-.column-filter-control.is-number { display: inline-flex; width: calc(50% - 4px); }
-.column-filter-control.is-number + .column-filter-control.is-number { margin-left: 8px; }
+.column-filter-control.is-inline { display: inline-flex; width: calc(50% - 4px); }
+.column-filter-control.is-inline + .column-filter-control.is-inline { margin-left: 8px; }
 .column-filter-footer { display: flex; justify-content: space-between; gap: 8px; }
 </style>

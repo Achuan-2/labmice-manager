@@ -574,8 +574,8 @@ const emptyFilters = {
   in_cage: null,
   dob_from: '',
   dob_to: '',
-  age_weeks_gt: null,
-  age_weeks_lt: null,
+  age_weeks_op: 'gte',
+  age_weeks: null,
   genotype: '',
   test_status: '',
   claim_purpose: '',
@@ -654,8 +654,12 @@ const columnControls = computed(() => {
     strain: [{ key: 'strain', label: '品系', type: 'select', options: options(strainOptions.value) }],
     gender: [{ key: 'gender', label: '性别', type: 'select', options: gridOptions.value.gender }],
     age_weeks: [
-      { key: 'age_weeks_gt', label: '周龄大于（周）', type: 'number' },
-      { key: 'age_weeks_lt', label: '周龄小于（周）', type: 'number' },
+      { key: 'age_weeks_op', label: '比较条件', type: 'select', inline: true, filterable: false, clearable: false,
+        options: [
+          { value: 'gt', label: '大于 (>)' }, { value: 'gte', label: '大于等于 (≥)' },
+          { value: 'eq', label: '等于 (=)' }, { value: 'lt', label: '小于 (<)' }, { value: 'lte', label: '小于等于 (≤)' },
+        ] },
+      { key: 'age_weeks', label: '周龄（周）', type: 'number', inline: true },
     ],
     dob: [
       { key: 'dob_from', label: '出生日期起始', type: 'date' },
@@ -691,8 +695,8 @@ function columnMenuProps(field, label) {
   const modelValue = Object.fromEntries(controls.map(control => [control.key, filters[control.key]]))
   return {
     label, controls, modelValue,
-    filtered: Object.values(modelValue).some(hasFilterValue),
-    anyFiltered: Object.values(filters).some(hasFilterValue),
+    filtered: field === 'age_weeks' ? hasFilterValue(filters.age_weeks) : Object.values(modelValue).some(hasFilterValue),
+    anyFiltered: Object.entries(filters).some(([key, value]) => key !== 'age_weeks_op' && hasFilterValue(value)),
     sortOrder: sortBy.value === field ? sortOrder.value : '',
   }
 }
@@ -700,10 +704,6 @@ function columnMenuProps(field, label) {
 function columnMenuEvents(field) {
   return {
     filter: values => {
-      if (values.age_weeks_gt != null && values.age_weeks_lt != null && values.age_weeks_gt >= values.age_weeks_lt) {
-        ElMessage.warning('周龄下限必须小于上限')
-        return
-      }
       if (values.dob_from && values.dob_to && values.dob_from > values.dob_to) {
         ElMessage.warning('出生日期起始不能晚于截止日期')
         return
@@ -852,8 +852,8 @@ async function loadMice() {
       in_cage: filters.in_cage,
       dob_from: filters.dob_from || undefined,
       dob_to: filters.dob_to || undefined,
-      age_weeks_gt: filters.age_weeks_gt ?? undefined,
-      age_weeks_lt: filters.age_weeks_lt ?? undefined,
+      age_weeks_op: filters.age_weeks != null ? filters.age_weeks_op : undefined,
+      age_weeks: filters.age_weeks ?? undefined,
       genotype: filters.genotype || undefined,
       test_status: filters.test_status || undefined,
       claim_purpose: filters.claim_purpose || undefined,

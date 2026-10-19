@@ -135,6 +135,35 @@ class MouseSortingTests(unittest.TestCase):
         self.assertEqual(self.codes(age_weeks_gt=8.1), ["R003"])
         self.assertEqual(self.codes(age_weeks_lt=7.9), ["R020"])
 
+    def test_week_age_comparison_supports_all_five_operators(self):
+        self.set_birth_dates_by_age(R100=56, R003=57, R020=55, R004=None)
+        expected = {
+            'gt': ['R003'], 'gte': ['R003', 'R100'], 'eq': ['R100'],
+            'lt': ['R020'], 'lte': ['R020', 'R100'],
+        }
+        for operator, codes in expected.items():
+            with self.subTest(operator=operator):
+                self.assertEqual(self.codes(age_weeks_op=operator, age_weeks=8), codes)
+        # 57 days displays as 8.1 weeks: equality and inclusive comparisons use that displayed value.
+        self.assertEqual(self.codes(age_weeks_op='eq', age_weeks=8.1), ['R003'])
+        self.assertEqual(self.codes(age_weeks_op='gt', age_weeks=8.1), [])
+        self.assertEqual(self.codes(age_weeks_op='gte', age_weeks=8, strain='B'), ['R100'])
+        page = self.listing(age_weeks_op='gte', age_weeks=8, sort_by='age_weeks', page_size=1, page=2)
+        self.assertEqual((page['total'], page['items'][0]['mouse_code']), (2, 'R100'))
+
+    def test_week_age_comparison_handles_zero_and_invalid_inputs(self):
+        self.set_birth_dates_by_age(R100=0, R003=-7, R020=1, R004=None)
+        self.assertEqual(self.codes(age_weeks_op='eq', age_weeks=0), ['R003', 'R100'])
+        self.assertEqual(self.codes(age_weeks_op='lte', age_weeks=0), ['R003', 'R100'])
+        self.assertEqual(self.codes(age_weeks_op='gt', age_weeks=0), ['R020'])
+        for params in (
+            {'age_weeks_op': 'eq'}, {'age_weeks': 8}, {'age_weeks_op': 'invalid', 'age_weeks': 8},
+            {'age_weeks_op': 'eq', 'age_weeks': -1}, {'age_weeks_op': 'eq', 'age_weeks': 'nan'},
+            {'age_weeks_op': 'eq', 'age_weeks': 'inf'},
+        ):
+            with self.subTest(params=params):
+                self.assertEqual(self.client.get('/api/mice', params=params).status_code, 422)
+
     def test_week_age_sort_is_numeric_and_keeps_unknown_dates_last(self):
         self.set_birth_dates_by_age(R100=56, R003=70, R020=7, R004=None)
         self.assertEqual(self.codes(sort_by="age_weeks", sort_order="asc"), ["R020", "R100", "R003", "R004"])

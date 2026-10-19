@@ -182,6 +182,8 @@ def list_mice(
     dob_to: Optional[datetime.date] = None,
     age_weeks_gt: Annotated[Optional[float], Query(ge=0, allow_inf_nan=False)] = None,
     age_weeks_lt: Annotated[Optional[float], Query(ge=0, allow_inf_nan=False)] = None,
+    age_weeks_op: Optional[Literal["gt", "gte", "eq", "lt", "lte"]] = None,
+    age_weeks: Annotated[Optional[float], Query(ge=0, allow_inf_nan=False)] = None,
     genotype: Optional[str] = None,
     test_status: Optional[Literal["pending", "tested"]] = None,
     claim_purpose: Optional[str] = None,
@@ -198,6 +200,8 @@ def list_mice(
         raise HTTPException(status_code=422, detail="出生日期起始不能晚于截止日期")
     if age_weeks_gt is not None and age_weeks_lt is not None and age_weeks_gt >= age_weeks_lt:
         raise HTTPException(status_code=422, detail="周龄下限必须小于上限")
+    if (age_weeks_op is None) != (age_weeks is None):
+        raise HTTPException(status_code=422, detail="请选择周龄比较条件并填写周数")
     query = db.query(Mouse).join(Mouse.cage, isouter=True)
 
     if mouse_code:
@@ -253,6 +257,16 @@ def list_mice(
             query = query.filter(age_days > age_weeks_gt * 7)
         if age_weeks_lt is not None:
             query = query.filter(age_days < age_weeks_lt * 7)
+    if age_weeks is not None:
+        # Compare the one-decimal value shown in the table so equality matches visible ages.
+        displayed_weeks = func.round(mouse_age_days_expression() / 7.0, 1)
+        query = query.filter({
+            "gt": displayed_weeks > age_weeks,
+            "gte": displayed_weeks >= age_weeks,
+            "eq": displayed_weeks == age_weeks,
+            "lt": displayed_weeks < age_weeks,
+            "lte": displayed_weeks <= age_weeks,
+        }[age_weeks_op])
     if genotype:
         pattern = f"%{genotype.strip()}%"
         query = query.filter(or_(
