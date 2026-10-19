@@ -162,9 +162,6 @@
             <GenotypeGridCell v-bind="gridCellProps(row, column.field, $index)" v-on="gridCellEvents(row, column.field, $index)">
               <template v-if="column.field === 'strain'">
                 <span class="font-semibold text-blue-700">{{ row.strain || '-' }}</span>
-                <button v-if="row.strain" type="button" class="ml-2 text-xs text-blue-500 shrink-0" title="查看品系背景说明与小鼠备注" @click.stop="openStrainNotesDialog(row)">
-                  {{ strainNotesMap[row.strain] ? '📝 备注' : '备注' }}
-                </button>
               </template>
               <template v-else-if="column.field === 'gender'">
                 <el-tag v-if="row.gender === 'M'" size="small" type="primary">♂ 雄</el-tag>
@@ -513,47 +510,6 @@
       </template>
     </el-dialog>
 
-    <!-- Strain & Mouse Notes Dialog -->
-    <el-dialog v-model="showStrainNotesDialog" title="品系档案与备注设置" width="500px">
-      <div v-if="currentSelectedStrain" class="space-y-4 text-xs">
-        <div class="bg-blue-50/70 border border-blue-100 rounded-lg p-3 flex justify-between items-center">
-          <div>
-            <span class="text-gray-500">品系名称:</span>
-            <span class="ml-2 font-bold text-sm text-blue-800 font-mono">{{ currentSelectedStrain }}</span>
-          </div>
-          <el-tag size="small" type="primary">在库小鼠: {{ currentStrainMouseCount }} 只</el-tag>
-        </div>
-
-        <div>
-          <div class="font-semibold text-gray-700 mb-1 flex items-center justify-between">
-            <span>🧬 品系全局背景 / 繁育与鉴定说明 (对所有该品系小鼠通用)</span>
-          </div>
-          <el-input
-            v-model="strainNotesForm.strain_notes"
-            type="textarea"
-            :rows="3"
-            placeholder="如: 该品系由集萃引入，需与C57交配扩繁，基因鉴定使用Primer 12号..."
-          />
-        </div>
-
-        <div v-if="currentStrainTargetMouse" class="border-t border-gray-100 pt-3">
-          <div class="font-semibold text-gray-700 mb-1 flex items-center justify-between">
-            <span>🐁 当前小鼠专属备注 [{{ currentStrainTargetMouse.mouse_code }}]</span>
-          </div>
-          <el-input
-            v-model="strainNotesForm.mouse_notes"
-            type="textarea"
-            :rows="2"
-            placeholder="本只小鼠的单独领用或实验备注..."
-          />
-        </div>
-      </div>
-      <template #footer>
-        <el-button @click="showStrainNotesDialog = false">取消</el-button>
-        <el-button type="primary" :loading="savingStrainNotes" @click="saveStrainNotes">保存备注</el-button>
-      </template>
-    </el-dialog>
-
     <!-- Mouse Detail Modal -->
     <MouseDetailModal
       v-model="showMouseDetailModal"
@@ -579,7 +535,7 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ArrowDownWideNarrow } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
-import { miceApi, cagesApi, claimersApi, strainsApi, mouseStatusesApi, importExportApi } from '@/api'
+import { miceApi, cagesApi, claimersApi, mouseStatusesApi, importExportApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { useClaimerColors } from '@/composables/useClaimerColors'
 import SetOwnerDialog from '@/components/SetOwnerDialog.vue'
@@ -736,7 +692,6 @@ function gridCellProps(row, field, rowIndex) {
     editable: authStore.isAdmin,
     editOnClick: true,
     clearable: !['gender', 'status'].includes(field),
-    showEditButton: field === 'parents',
     disabled: gridSaving.value || loading.value || !!fillDrag.value,
     active: activeCell.value?.id === row.id && activeCell.value?.field === field,
     inFillRange: isInFillRange(field, rowIndex),
@@ -795,69 +750,13 @@ const detectedCodes = computed(() => {
 })
 const detectedCodesCount = computed(() => detectedCodes.value.length)
 
-// Strain Notes Dialog State & Methods
-const showStrainNotesDialog = ref(false)
-const currentSelectedStrain = ref('')
-const currentStrainTargetMouse = ref(null)
-const currentStrainMouseCount = ref(0)
-const savingStrainNotes = ref(false)
-const strainNotesMap = ref({})
-
-const strainNotesForm = reactive({
-  strain_notes: '',
-  mouse_notes: ''
-})
-
-async function openStrainNotesDialog(row) {
-  if (!row?.strain) return
-  currentSelectedStrain.value = row.strain
-  currentStrainTargetMouse.value = row
-  strainNotesForm.mouse_notes = row.notes || ''
-  strainNotesForm.strain_notes = strainNotesMap.value[row.strain] || ''
-
-  showStrainNotesDialog.value = true
-
-  try {
-    const detail = await strainsApi.getStrain(row.strain)
-    strainNotesForm.strain_notes = detail.notes || ''
-    currentStrainMouseCount.value = detail.mouse_count || 0
-  } catch (e) {
-    console.error(e)
-  }
-}
-
-async function saveStrainNotes() {
-  if (!currentSelectedStrain.value) return
-  savingStrainNotes.value = true
-  try {
-    await strainsApi.updateStrainNotes(currentSelectedStrain.value, strainNotesForm.strain_notes)
-    strainNotesMap.value[currentSelectedStrain.value] = strainNotesForm.strain_notes
-
-    if (currentStrainTargetMouse.value?.id && strainNotesForm.mouse_notes !== currentStrainTargetMouse.value.notes) {
-      await miceApi.updateMouse(currentStrainTargetMouse.value.id, {
-        notes: strainNotesForm.mouse_notes
-      })
-      currentStrainTargetMouse.value.notes = strainNotesForm.mouse_notes
-    }
-
-    ElMessage.success('品系及小鼠备注保存成功')
-    showStrainNotesDialog.value = false
-    loadMice()
-  } catch (e) {
-    ElMessage.error(e.response?.data?.detail || '保存备注失败')
-  } finally {
-    savingStrainNotes.value = false
-  }
-}
-
 async function loadOptions() {
   try {
-    const [rooms, strains, parents, claimers, strainList, statuses] = await Promise.all([
+    const [rooms, strains, parents, claimers, statuses] = await Promise.all([
       cagesApi.listRooms(),
       miceApi.getAllStrains(),
       miceApi.getAllParents(),
       claimersApi.listClaimers(),
-      strainsApi.listStrains(),
       mouseStatusesApi.listStatuses()
     ])
     roomOptions.value = rooms
@@ -870,13 +769,6 @@ async function loadOptions() {
       ...statusPresentation(status)
     }))
 
-    const map = {}
-    if (Array.isArray(strainList)) {
-      strainList.forEach(s => {
-        if (s.notes) map[s.name] = s.notes
-      })
-    }
-    strainNotesMap.value = map
   } catch (e) {
     console.error(e)
   }

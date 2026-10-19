@@ -95,6 +95,7 @@ try {
   console.log('Checking mouse cells')
   await page.getByText('UI001', { exact: true }).first().waitFor()
   const strain = await cell('UI001', '品系 / 基因型')
+  assert.equal(await strain.getByRole('button', { name: '备注', exact: true }).count(), 0)
   await strain.locator('span').first().click()
   await strain.locator('input').fill('C57BL/6J')
   await saved(() => strain.locator('input').press('Enter'))
@@ -129,7 +130,8 @@ try {
   assert.equal(writes.at(-1).dob, null)
 
   const parents = await cell('UI001', '父母系谱 (M+F)')
-  await parents.getByRole('button', { name: '编辑父母系谱 (M+F)', exact: true }).click()
+  assert.equal(await parents.locator('.genotype-edit-button').count(), 0)
+  await parents.click()
   await parents.locator('input').fill('P001M+P002F')
   await saved(() => parents.locator('input').press('Enter'))
   assert.equal(writes.at(-1).parents, 'P001M+P002F')
