@@ -1,6 +1,6 @@
 import re
 import datetime
-from typing import List, Optional, Dict, Any
+from typing import List, Literal, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import or_, and_, case, func, literal
@@ -166,6 +166,8 @@ def list_mice(
     status: Optional[str] = None,
     has_owner: Optional[bool] = None,
     in_cage: Optional[bool] = None,
+    sort_by: Literal["added", "mouse_code", "dob", "strain", "status"] = "added",
+    sort_order: Literal["asc", "desc"] = "desc",
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth)
 ):
@@ -237,13 +239,14 @@ def list_mice(
             else_=6
         )
         order_clauses.append(relevance)
-    status_priority = case(
-        (Mouse.status == "在笼", 0),
-        (Mouse.status.in_(["出笼", "死亡"]), 2),
-        else_=1,
-    )
-    order_clauses.append(status_priority)
-    order_clauses.append(Mouse.id.desc())
+    if sort_by != "added":
+        sort_column = getattr(Mouse, sort_by)
+        # Missing values stay last in either direction; ties follow entry order.
+        missing_value = func.coalesce(func.trim(sort_column), "") == ""
+        order_clauses.append(case((missing_value, 1), else_=0))
+        order_clauses.append(sort_column.asc() if sort_order == "asc" else sort_column.desc())
+    # IDs persist the original insertion sequence across edits and all entry paths.
+    order_clauses.append(Mouse.id.asc() if sort_order == "asc" else Mouse.id.desc())
 
     items = (
         query.options(

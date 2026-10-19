@@ -45,7 +45,7 @@
         </el-select>
       </div>
 
-      <div class="flex items-center justify-between pt-2 border-t border-gray-100">
+      <div class="flex flex-wrap gap-3 items-center justify-between pt-2 border-t border-gray-100">
         <div class="flex items-center gap-2">
           <span class="text-xs text-gray-500 font-medium">快捷筛选:</span>
           <el-radio-group v-model="quickFilter" size="small" @change="handleQuickFilter">
@@ -56,7 +56,16 @@
           </el-radio-group>
         </div>
 
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="mouse-sort-controls flex items-center gap-2" role="group" aria-label="小鼠列表排序">
+            <el-select v-model="sortBy" size="small" style="width: 140px" aria-label="排序方式" @change="handleSearch">
+              <el-option v-for="option in mouseSortOptions" :key="option.value" :label="option.label" :value="option.value" />
+            </el-select>
+            <el-select v-model="sortOrder" size="small" style="width: 85px" aria-label="排序方向" @change="handleSearch">
+              <el-option label="升序" value="asc" />
+              <el-option label="降序" value="desc" />
+            </el-select>
+          </div>
           <el-button @click="resetFilters" size="small">重置筛选</el-button>
           <el-button type="primary" size="small" @click="handleSearch">查询</el-button>
         </div>
@@ -625,6 +634,23 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(50)
 const selectedMice = ref([])
+let loadRequestId = 0
+
+const mouseSortOptions = [
+  { value: 'added', label: '录入顺序' },
+  { value: 'mouse_code', label: '耳标编号' },
+  { value: 'dob', label: '出生日期' },
+  { value: 'strain', label: '品系' },
+  { value: 'status', label: '状态' },
+]
+const savedSortBy = localStorage.getItem('mice_sort_by')
+const savedSortOrder = localStorage.getItem('mice_sort_order')
+const sortBy = ref(mouseSortOptions.some(option => option.value === savedSortBy) ? savedSortBy : 'added')
+const sortOrder = ref(['asc', 'desc'].includes(savedSortOrder) ? savedSortOrder : 'desc')
+watch([sortBy, sortOrder], ([by, order]) => {
+  localStorage.setItem('mice_sort_by', by)
+  localStorage.setItem('mice_sort_order', order)
+})
 
 const roomOptions = ref([])
 const strainOptions = ref([])
@@ -826,11 +852,14 @@ async function handleStatusesChanged() {
 }
 
 async function loadMice() {
+  const requestId = ++loadRequestId
   loading.value = true
   try {
     const params = {
       page: page.value,
       page_size: pageSize.value,
+      sort_by: sortBy.value,
+      sort_order: sortOrder.value,
       keyword: filters.keyword || undefined,
       room: filters.room || undefined,
       strain: filters.strain || undefined,
@@ -841,12 +870,13 @@ async function loadMice() {
       has_owner: filters.has_owner
     }
     const res = await miceApi.listMice(params)
+    if (requestId !== loadRequestId) return
     miceList.value = res.items
     total.value = res.total
   } catch (e) {
-    ElMessage.error('加载小鼠列表失败')
+    if (requestId === loadRequestId) ElMessage.error('加载小鼠列表失败')
   } finally {
-    loading.value = false
+    if (requestId === loadRequestId) loading.value = false
   }
 }
 
@@ -1032,7 +1062,7 @@ async function submitAddMouseForm() {
         : '小鼠已成功录入'))
     }
     showAddMouseDialog.value = false
-    loadMice()
+    handleSearch()
     loadOptions()
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || '保存失败')
