@@ -206,19 +206,20 @@
             :closable="false"
             show-icon
           />
-          <div v-if="existingArchiveEntries.length" class="text-xs text-gray-500 mt-2">已有小鼠档案：{{ existingArchiveEntries.map(entry => entry.mouse_code).join('、') }}</div>
-          <el-table v-if="existingResultRows.length" :data="existingResultRows" size="small" max-height="240" class="mt-2" border>
+          <el-table :data="existingMouseRows" row-key="mouse_code" size="small" max-height="240" class="mt-2" border>
             <el-table-column prop="mouse_code" label="耳标编号" min-width="90" />
+            <el-table-column label="鉴定状态" width="90">
+              <template #default="{ row }">
+                <el-tag size="small" :type="row.tested ? 'success' : 'warning'">{{ row.tested ? '已鉴定' : '未鉴定' }}</el-tag>
+              </template>
+            </el-table-column>
             <el-table-column prop="test_date" label="鉴定日期" min-width="105">
-              <template #default="{ row }">{{ row.test_date || '未填写' }}</template>
+              <template #default="{ row }">{{ row.test_date || (row.tested ? '未填写' : '—') }}</template>
             </el-table-column>
             <el-table-column v-for="(field, index) in genotypeFields" :key="field" :label="`Genotype ${index + 1}`" min-width="100">
               <template #default="{ row }">{{ row[field] || '—' }}</template>
             </el-table-column>
           </el-table>
-          <div v-if="pendingEntries.length && !createNewMouse" class="text-xs text-amber-700 mt-2">
-            已有待检验记录：{{ pendingEntries.map(entry => `${entry.mouse_code}（${entry.pending_count} 条）`).join('、') }}。建议在原记录填写结果，避免重复登记。
-          </div>
         </div>
         <el-form-item v-if="isEdit || !isBatchEntry" label="出生日期">
           <el-date-picker v-model="form.dob" type="date" value-format="YYYY-MM-DD" placeholder="选择小鼠出生日期" style="width: 100%" @change="manualFields.add('dob')" />
@@ -339,7 +340,6 @@ const entryChecks = ref([])
 const createNewMouse = ref(false)
 const testedEntries = computed(() => entryChecks.value.filter(entry => entry.tested_records.length))
 const pendingEntries = computed(() => entryChecks.value.filter(entry => entry.pending_count))
-const existingArchiveEntries = computed(() => entryChecks.value.filter(entry => entry.mouse_id))
 const existingEntries = computed(() => entryChecks.value.filter(entry => entry.mouse_id || entry.tested_records.length || entry.pending_count))
 const entryWarning = computed(() => {
   if (createNewMouse.value && existingEntries.value.length) return '以下编号已存在，新增小鼠时将自动更名'
@@ -347,9 +347,11 @@ const entryWarning = computed(() => {
   if (pendingEntries.value.length) return '已有待检验记录，保存需确认再次登记。'
   return ''
 })
-const existingResultRows = computed(() => testedEntries.value.flatMap(entry => (
-  entry.tested_records.map(record => ({ ...record, mouse_code: entry.mouse_code }))
-)))
+const existingMouseRows = computed(() => existingEntries.value.map(entry => ({
+  ...entry.tested_records[0],
+  mouse_code: entry.mouse_code,
+  tested: entry.tested_records.length > 0,
+})))
 const strainOptions = ref([])
 const addCount = ref(1)
 const startCode = ref('')
