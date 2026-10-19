@@ -4,7 +4,7 @@
       <div>
         <div class="text-base font-bold text-gray-800">小鼠基因型鉴定结果档案</div>
         <div class="text-xs text-gray-500 mt-1">
-          鉴定结果可留空，检验后再补充；支持批量编号和向下填充基因型
+          鉴定结果可留空，检验后再补充；支持批量编号和向下填充鉴定信息
         </div>
       </div>
 
@@ -44,7 +44,7 @@
 
     <!-- Genotype Table -->
     <div v-if="authStore.isAdmin" class="text-xs text-gray-500 mb-2" role="status">
-      {{ gridSaving ? '正在保存基因型…' : fillDrag ? `松开鼠标，将填充 ${Math.abs(fillDrag.endIndex - fillDrag.startIndex)} 条记录` : '双击 Genotype 单元格填写或选择结果，再拖动右下角蓝色方块向下填充，覆盖该列原值并自动保存。填充限当前页；编辑时保持行位置，查询或翻页后刷新筛选。' }}
+      {{ gridSaving ? '正在保存鉴定信息…' : fillDrag ? `松开鼠标，将填充 ${Math.abs(fillDrag.endIndex - fillDrag.startIndex)} 条记录` : '双击出生日期、鉴定日期、品系、性别、父母系谱或 Genotype 单元格编辑，再拖动右下角蓝色方块向下填充，覆盖该列原值并自动保存。填充限当前页；编辑时保持行位置，查询或翻页后刷新筛选。' }}
     </div>
     <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
       <el-table v-loading="loading || gridSaving" :data="genotypes" row-key="id" stripe style="width: 100%">
@@ -53,15 +53,23 @@
             <el-tag size="small" :type="hasGenotypeResult(row) ? 'success' : 'warning'">{{ hasGenotypeResult(row) ? '已鉴定' : '待鉴定' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="dob" label="出生日期" width="110">
-          <template #default="{ row }">
-            <span class="font-mono text-xs text-gray-600">{{ row.dob || '-' }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="test_date" label="鉴定日期" width="110">
-          <template #default="{ row }">
-            <span class="font-mono text-xs text-gray-600">{{ row.test_date || '-' }}</span>
+        <el-table-column v-for="column in dateColumns" :key="column.field" :prop="column.field" :label="column.label" width="155">
+          <template #default="{ row, $index }">
+            <GenotypeGridCell
+              :value="row[column.field] || ''"
+              :label="column.label"
+              editor-type="date"
+              :editable="authStore.isAdmin"
+              :disabled="gridSaving || loading || !!fillDrag"
+              :active="activeCell?.id === row.id && activeCell?.field === column.field"
+              :in-fill-range="isInFillRange(column.field, $index)"
+              @activate="activateCell(row.id, column.field)"
+              @save="value => saveGridValues([row.id], column.field, value)"
+              @fill-start="event => startFill(column.field, $index, event)"
+              @fill-enter="extendFill(column.field, $index)"
+            >
+              <span class="font-mono text-xs text-gray-600">{{ row[column.field] || '-' }}</span>
+            </GenotypeGridCell>
           </template>
         </el-table-column>
 
@@ -79,23 +87,32 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="strain" label="品系" min-width="120">
-          <template #default="{ row }">
-            <span class="font-semibold text-blue-700">{{ row.strain || '-' }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="gender" label="性别" width="70">
-          <template #default="{ row }">
-            <span v-if="row.gender === 'M'" class="text-blue-500 font-bold">♂ 雄</span>
-            <span v-else-if="row.gender === 'F'" class="text-pink-500 font-bold">♀ 雌</span>
-            <span v-else class="text-gray-400 text-xs">-</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="parents" label="父母系谱 (M+F)" min-width="190">
-          <template #default="{ row }">
-            <PedigreeTags :parents="row.parents" @click-parent="openMouseDetail" />
+        <el-table-column v-for="column in mouseInfoColumns" :key="column.field" :prop="column.field" :label="column.label" :min-width="column.width">
+          <template #default="{ row, $index }">
+            <GenotypeGridCell
+              :value="row[column.field] || ''"
+              :label="column.label"
+              :editor-type="column.editorType"
+              :show-edit-button="column.field === 'parents'"
+              :max-length="column.maxLength"
+              :options="gridOptions[column.field]"
+              :editable="authStore.isAdmin"
+              :disabled="gridSaving || loading || !!fillDrag"
+              :active="activeCell?.id === row.id && activeCell?.field === column.field"
+              :in-fill-range="isInFillRange(column.field, $index)"
+              @activate="activateCell(row.id, column.field)"
+              @save="value => saveGridValues([row.id], column.field, value)"
+              @fill-start="event => startFill(column.field, $index, event)"
+              @fill-enter="extendFill(column.field, $index)"
+            >
+              <span v-if="column.field === 'strain'" class="font-semibold text-blue-700">{{ row.strain || '-' }}</span>
+              <template v-else-if="column.field === 'gender'">
+                <span v-if="row.gender === 'M'" class="text-blue-500 font-bold">♂ 雄</span>
+                <span v-else-if="row.gender === 'F'" class="text-pink-500 font-bold">♀ 雌</span>
+                <span v-else class="text-gray-400 text-xs">{{ row.gender || '-' }}</span>
+              </template>
+              <PedigreeTags v-else :parents="row.parents" @click-parent="openMouseDetail" />
+            </GenotypeGridCell>
           </template>
         </el-table-column>
 
@@ -305,6 +322,15 @@ const pageSize = ref(50)
 const optionsLoading = ref(false)
 const genotypeOptions = reactive({ genotype_1: [], genotype_2: [], genotype_3: [] })
 const genotypeFields = ['genotype_1', 'genotype_2', 'genotype_3']
+const dateColumns = [
+  { field: 'dob', label: '出生日期' },
+  { field: 'test_date', label: '鉴定日期' },
+]
+const mouseInfoColumns = [
+  { field: 'strain', label: '品系', width: 160, editorType: 'text', maxLength: 128 },
+  { field: 'gender', label: '性别', width: 105, editorType: 'select', maxLength: 16 },
+  { field: 'parents', label: '父母系谱 (M+F)', width: 210, editorType: 'text', maxLength: 128 },
+]
 const genotypeLookupFields = ['test_date', ...genotypeFields, 'op_record', 'notes']
 const genotypeSortOptions = [
   { value: 'added', label: '录入顺序' },
@@ -371,6 +397,11 @@ const existingMouseRows = computed(() => existingEntries.value.map(entry => ({
   tested: entry.tested_records.length > 0,
 })))
 const strainOptions = ref([])
+const gridOptions = computed(() => ({
+  strain: [...new Set([...strainOptions.value, ...genotypes.value.map(row => row.strain).filter(Boolean)])],
+  gender: [{ value: 'M', label: '♂ 雄' }, { value: 'F', label: '♀ 雌' }, { value: '未知', label: '未知' }],
+  parents: [...new Set(genotypes.value.map(row => row.parents).filter(Boolean))],
+}))
 const addCount = ref(1)
 const startCode = ref('')
 const manualFields = new Set()
@@ -547,10 +578,18 @@ async function saveGridValues(recordIds, field, value) {
     for (const row of genotypes.value) {
       if (updates.has(row.id)) Object.assign(row, updates.get(row.id))
     }
-    ElMessage.success(`已保存 ${result.updated} 条基因型`)
-    await loadGenotypeOptions()
+    // Birth dates belong to the archive and are shared by every test for that mouse.
+    if (field === 'dob') {
+      const mouseCodes = new Set(result.items.map(record => record.mouse_code))
+      for (const row of genotypes.value) {
+        if (mouseCodes.has(row.mouse_code)) row.dob = value || null
+      }
+    }
+    ElMessage.success(`已保存 ${result.updated} 条鉴定信息`)
+    if (genotypeFields.includes(field)) await loadGenotypeOptions()
   } catch (error) {
-    ElMessage.error(error.response?.data?.detail || '基因型保存失败，请重试')
+    const detail = error.response?.data?.detail
+    ElMessage.error(typeof detail === 'string' ? detail : '鉴定信息保存失败，请检查填写内容后重试')
   } finally {
     gridSaving.value = false
   }

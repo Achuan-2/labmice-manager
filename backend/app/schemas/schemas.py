@@ -1,6 +1,6 @@
 from typing import Optional, List, Dict, Any, Literal
-from pydantic import BaseModel, Field
-from datetime import datetime
+from pydantic import BaseModel, Field, model_validator
+from datetime import date, datetime
 
 # --- Auth & User ---
 class UserLogin(BaseModel):
@@ -72,8 +72,26 @@ class GenotypeRecordUpdate(BaseModel):
 
 class GenotypeBatchFill(BaseModel):
     record_ids: List[int] = Field(min_length=1, max_length=500)
-    field: Literal["genotype_1", "genotype_2", "genotype_3"]
-    value: Optional[str] = Field(default=None, max_length=64)
+    field: Literal["genotype_1", "genotype_2", "genotype_3", "dob", "test_date", "strain", "gender", "parents"]
+    value: Optional[str] = Field(default=None, max_length=128)
+
+    @model_validator(mode="after")
+    def validate_fill_value(self):
+        if self.value is None:
+            return self
+        self.value = self.value.strip()
+        if self.field.startswith("genotype_") and len(self.value) > 64:
+            raise ValueError("基因型最多填写 64 个字符")
+        if self.field in ("dob", "test_date") and self.value:
+            try:
+                parsed = date.fromisoformat(self.value)
+            except ValueError:
+                raise ValueError("日期需为有效的 YYYY-MM-DD 日期") from None
+            if parsed.isoformat() != self.value:
+                raise ValueError("日期需使用 YYYY-MM-DD 格式")
+        if self.field == "gender" and self.value not in ("", "M", "F", "未知"):
+            raise ValueError("性别请选择雄、雌或未知")
+        return self
 
 class GenotypeRecordResponse(GenotypeRecordBase):
     id: int

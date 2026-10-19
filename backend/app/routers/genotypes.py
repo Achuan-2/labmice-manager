@@ -364,12 +364,13 @@ def fill_genotype_records(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Fill one result column atomically, preserving all other record fields."""
+    """Fill one editable column atomically and keep the mouse archive in sync."""
     ids = set(data.record_ids)
     records = db.query(GenotypeRecord).filter(GenotypeRecord.id.in_(ids)).all()
     if len(records) != len(ids):
         raise HTTPException(status_code=404, detail="部分鉴定记录不存在，请刷新后重试")
-    value = normalize_genotype_value(data.value)
+    is_genotype_field = data.field.startswith("genotype_")
+    value = normalize_genotype_value(data.value) if is_genotype_field else (data.value or None)
     codes = set()
     try:
         for record in records:
@@ -383,10 +384,13 @@ def fill_genotype_records(
         db.flush()
         affected_codes = {record.mouse_code for record in records}
         for mouse in db.query(Mouse).filter(Mouse.mouse_code.in_(affected_codes)).all():
-            if mouse.mouse_code in codes:
-                _sync_mouse_genotype_summary(mouse, db)
-            else:
-                sync_mouse_genotyping_status(mouse, db)
+            if data.field in ("dob", "strain", "gender", "parents"):
+                setattr(mouse, data.field, value if data.field != "strain" else value or "")
+            if is_genotype_field or data.field == "test_date":
+                if mouse.mouse_code in codes:
+                    _sync_mouse_genotype_summary(mouse, db)
+                else:
+                    sync_mouse_genotyping_status(mouse, db)
         db.commit()
     except Exception:
         db.rollback()
@@ -395,9 +399,10 @@ def fill_genotype_records(
         "updated": len(records),
         "items": [
             {
-                "id": record.id, "test_date": record.test_date,
+                "id": record.id, "mouse_code": record.mouse_code, "test_date": record.test_date,
                 "genotype_1": record.genotype_1, "genotype_2": record.genotype_2,
                 "genotype_3": record.genotype_3,
+                data.field: getattr(record, data.field),
             }
             for record in records
         ],

@@ -2,19 +2,47 @@
   <div
     class="genotype-grid-cell"
     :class="{ 'is-active': active && editable, 'is-fill-range': inFillRange, 'is-editable': editable }"
-    :title="editable ? '双击填写基因型；拖动右下角方块向下填充' : ''"
+    :title="editable ? `双击填写${label}；拖动右下角方块向下填充` : ''"
     @click="emit('activate')"
     @dblclick="startEdit"
     @pointerenter="emit('fill-enter')"
   >
+    <el-date-picker
+      v-if="editing && editorType === 'date'"
+      ref="input"
+      v-model="draft"
+      class="genotype-cell-input"
+      type="date"
+      value-format="YYYY-MM-DD"
+      :placeholder="`选择${label}`"
+      size="small"
+      @change="finishEdit"
+      @blur="finishEdit"
+      @keydown.esc.stop="editing = false"
+    />
+    <el-select
+      v-else-if="editing && editorType === 'select'"
+      ref="input"
+      v-model="draft"
+      class="genotype-cell-input"
+      :placeholder="`选择${label}`"
+      size="small"
+      clearable
+      automatic-dropdown
+      @change="finishEdit"
+      @visible-change="visible => { if (!visible) finishEdit() }"
+      @keydown.esc.stop="editing = false"
+    >
+      <el-option v-for="option in options" :key="option.value" :value="option.value" :label="option.label" />
+    </el-select>
     <el-autocomplete
-      v-if="editing"
+      v-else-if="editing"
       ref="input"
       v-model="draft"
       class="genotype-cell-input"
       :fetch-suggestions="suggestions"
-      :maxlength="64"
-      placeholder="填写或选择结果"
+      :maxlength="maxLength"
+      :placeholder="`填写或选择${label}`"
       size="small"
       @select="finishEdit"
       @blur="finishEdit"
@@ -22,14 +50,24 @@
       @keydown.esc.stop="editing = false"
     />
     <template v-else>
-      <el-tag v-if="value" size="small" :type="tagType">{{ value }}</el-tag>
-      <span v-else class="text-gray-300 text-xs">-</span>
+      <slot>
+        <el-tag v-if="value" size="small" :type="tagType">{{ value }}</el-tag>
+        <span v-else class="text-gray-300 text-xs">-</span>
+      </slot>
+      <button
+        v-if="showEditButton && editable && !disabled"
+        type="button"
+        class="genotype-edit-button"
+        :aria-label="`编辑${label}`"
+        @click.stop="startEdit"
+        @dblclick.stop
+      >编辑</button>
       <button
         v-if="editable && active && !disabled"
         type="button"
         class="genotype-fill-handle"
-        aria-label="拖动向下填充基因型"
-        title="拖动向下填充基因型"
+        :aria-label="`拖动向下填充${label}`"
+        :title="`拖动向下填充${label}`"
         @click.stop
         @pointerdown.stop.prevent="emit('fill-start', $event)"
       />
@@ -44,6 +82,10 @@ const props = defineProps({
   value: { type: String, default: '' },
   options: { type: Array, default: () => [] },
   tagType: { type: String, default: 'info' },
+  label: { type: String, default: '基因型' },
+  editorType: { type: String, default: 'genotype' },
+  maxLength: { type: Number, default: 64 },
+  showEditButton: Boolean,
   editable: Boolean,
   active: Boolean,
   inFillRange: Boolean,
@@ -55,12 +97,14 @@ const draft = ref('')
 const input = ref(null)
 
 function suggestions(query, callback) {
-  const values = [...new Set([...props.options, '纯合子', '杂合子', '野生型', '阳性', '阴性', 'HOM', 'HET', 'WT'])]
+  const defaults = props.editorType === 'genotype' ? ['纯合子', '杂合子', '野生型', '阳性', '阴性', 'HOM', 'HET', 'WT'] : []
+  const values = [...new Set([...props.options, ...defaults])]
   callback(values.filter(value => value && value.toLowerCase().includes(query.toLowerCase())).map(value => ({ value })))
 }
 
 async function startEdit() {
   if (!props.editable || props.disabled) return
+  emit('activate')
   draft.value = props.value || ''
   editing.value = true
   await nextTick()
@@ -70,7 +114,8 @@ async function startEdit() {
 function finishEdit() {
   if (!editing.value) return
   editing.value = false
-  if (draft.value.trim() !== (props.value || '').trim()) emit('save', draft.value.trim())
+  const value = (draft.value || '').trim()
+  if (value !== (props.value || '').trim()) emit('save', value)
 }
 </script>
 
@@ -99,5 +144,15 @@ function finishEdit() {
   touch-action: none;
   z-index: 1;
 }
-.genotype-cell-input { width: 100%; }
+.genotype-cell-input { width: 100%; min-width: 0; }
+.genotype-edit-button {
+  margin-left: auto;
+  padding: 2px 4px;
+  flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  color: #409eff;
+  font-size: 12px;
+  cursor: pointer;
+}
 </style>

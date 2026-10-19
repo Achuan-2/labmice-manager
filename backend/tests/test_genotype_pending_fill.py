@@ -211,6 +211,91 @@ class GenotypePendingFillTests(unittest.TestCase):
         self.assertEqual(self.fill([], "HET").status_code, 422)
         self.assertEqual(self.fill([record["id"]], "X" * 65).status_code, 422)
 
+    def test_basic_columns_fill_selected_records_and_sync_archives_without_testing(self):
+        records = self.register()
+        ids = [record["id"] for record in records[1:3]]
+        values = {
+            "dob": "2026-08-01", "test_date": "2026-10-19", "strain": "自定义品系",
+            "gender": "M", "parents": "P001M+P002F",
+        }
+        for field, value in values.items():
+            with self.subTest(field=field):
+                response = self.fill(ids, value, field)
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json()["updated"], 2)
+                self.assertTrue(all(row[field] == value for row in response.json()["items"]))
+                self.assertEqual(self.listing(test_status="pending")["total"], 4)
+                with Session(self.engine) as db:
+                    for record in db.query(GenotypeRecord).filter(GenotypeRecord.id.in_(ids)):
+                        self.assertEqual(getattr(record, field), value)
+                        self.assertEqual(record.notes, f"备注{record.mouse_code[1:]}")
+                        self.assertIsNone(record.genotype_1)
+                        if field != "test_date":
+                            self.assertEqual(getattr(record.mouse, field), value)
+        with Session(self.engine) as db:
+            untouched = db.get(GenotypeRecord, records[0]["id"])
+            self.assertEqual((untouched.strain, untouched.gender), ("5xFAD", "F"))
+            self.assertIsNone(untouched.test_date)
+            self.assertIsNone(untouched.mouse.test_date)
+
+    def test_basic_columns_can_be_cleared_without_archive_fallback(self):
+        records = self.register(dob="2026-08-01", parents="P001M+P002F", test_date="2026-10-19")
+        ids = [record["id"] for record in records]
+        for field in ("dob", "test_date", "strain", "gender", "parents"):
+            with self.subTest(field=field):
+                response = self.fill(ids, "  ", field)
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertTrue(all(not row[field] for row in self.listing()["items"]))
+                with Session(self.engine) as db:
+                    self.assertTrue(all(not getattr(mouse, field) for mouse in db.query(Mouse)))
+
+    def test_fill_birth_date_is_shared_by_same_mouse_history(self):
+        record = self.register()[0]
+        other = self.client.post("/api/genotypes", json={"mouse_code": "H489", "confirm_existing": True}).json()
+        response = self.fill([record["id"]], "2026-08-01", "dob")
+        self.assertEqual(response.status_code, 200, response.text)
+        rows = self.listing(mouse_code="H489")["items"]
+        self.assertEqual({row["id"] for row in rows}, {record["id"], other["id"]})
+        self.assertTrue(all(row["dob"] == "2026-08-01" for row in rows))
+        self.fill([record["id"]], None, "dob")
+        self.assertTrue(all(row["dob"] is None for row in self.listing(mouse_code="H489")["items"]))
+
+    def test_fill_test_date_recomputes_latest_tested_summary_and_preserves_pending(self):
+        record = self.register(genotype_1="WT", test_date="2026-09-01")[0]
+        newer = self.client.post("/api/genotypes", json={
+            "mouse_code": "H489", "confirm_existing": True,
+            "genotype_1": "HET", "test_date": "2026-10-01",
+        }).json()
+        response = self.fill([record["id"]], "2026-10-19", "test_date")
+        self.assertEqual(response.status_code, 200, response.text)
+        with Session(self.engine) as db:
+            mouse = db.query(Mouse).filter_by(mouse_code="H489").one()
+            self.assertEqual((mouse.genotype_1, mouse.test_date), ("WT", "2026-10-19"))
+        self.fill([record["id"]], "", "test_date")
+        with Session(self.engine) as db:
+            mouse = db.query(Mouse).filter_by(mouse_code="H489").one()
+            self.assertEqual((mouse.genotype_1, mouse.test_date), ("HET", newer["test_date"]))
+        pending = self.client.post("/api/genotypes", json={"mouse_code": "H489", "confirm_existing": True}).json()
+        self.fill([pending["id"]], "2099-01-01", "test_date")
+        with Session(self.engine) as db:
+            self.assertEqual(db.query(Mouse).filter_by(mouse_code="H489").one().test_date, newer["test_date"])
+
+    def test_basic_fill_validation_and_missing_record_are_atomic(self):
+        record = self.register()[0]
+        for field, value in (
+            ("dob", "2026-02-30"), ("test_date", "20261019"), ("test_date", "bad-date"),
+            ("gender", "invalid"), ("strain", "X" * 129), ("parents", "X" * 129),
+        ):
+            with self.subTest(field=field, value=value):
+                self.assertEqual(self.fill([record["id"]], value, field).status_code, 422)
+        for field, value in (("dob", "2026-08-01"), ("strain", "新值"), ("gender", "M"), ("parents", "P001M+P002F")):
+            self.assertEqual(self.fill([record["id"], 999999], value, field).status_code, 404)
+        with Session(self.engine) as db:
+            row = db.get(GenotypeRecord, record["id"])
+            self.assertEqual((row.strain, row.gender, row.mouse.strain, row.mouse.gender), ("5xFAD", "F", "5xFAD", "F"))
+            self.assertIsNone(row.mouse.dob)
+        self.assertEqual(self.fill([record["id"]], "2024-02-29", "dob").status_code, 200)
+
     def test_pending_markers_and_third_column_result_have_consistent_status(self):
         records = self.register()
         self.fill([records[0]["id"]], "待测")
@@ -245,7 +330,10 @@ class GenotypePendingFillTests(unittest.TestCase):
         record = self.register()[0]
         del self.app.dependency_overrides[require_admin]
         self.app.dependency_overrides[require_auth] = lambda: User(username="guest", role="guest")
-        self.assertIn(self.fill([record["id"]], "WT").status_code, (401, 403))
+        for field, value in (("genotype_1", "WT"), ("dob", "2026-08-01"), ("test_date", "2026-10-19"),
+                             ("strain", "品系"), ("gender", "M"), ("parents", "P001M+P002F")):
+            with self.subTest(field=field):
+                self.assertIn(self.fill([record["id"]], value, field).status_code, (401, 403))
 
     def test_added_order_is_default_and_date_order_is_optional_with_blanks_last(self):
         records = self.register()
