@@ -56,6 +56,7 @@ await context.route('**/api/**', async route => {
     json = { total: mice.length, items: mice }
   }
   else if (path === '/api/mice/all-strains') json = ['5xFAD', 'C57BL/6J']
+  else if (path === '/api/cages/rooms') json = ['东四', '东五']
   else if (path === '/api/mouse-statuses') json = [{ name: '在笼' }, { name: '实验中' }, { name: '死亡', removes_from_cage: true }]
   else if (path === '/api/claimers' || path === '/api/members') json = [{ id: 1, name: '领取人甲' }]
   // Unknown APIs stay mocked too, including dialogs and notifications.
@@ -112,6 +113,20 @@ try {
   await page.getByText('UI001', { exact: true }).first().waitFor()
   assert.equal(await page.getByPlaceholder('全部品系', { exact: true }).count(), 0)
   assert.equal(await page.getByRole('radio', { name: '全部小鼠', exact: true }).count(), 0)
+  const quickRoom = page.getByRole('combobox', { name: '快捷鼠房搜索', exact: true })
+  await quickRoom.click()
+  await queried(() => page.getByRole('option', { name: '东四', exact: true }).click())
+  assert.equal(queries.at(-1).room, '东四')
+  const roomMenu = await openColumnFilter('当前笼位与鼠房')
+  assert.ok((await roomMenu.textContent()).includes('东四'))
+  await roomMenu.getByRole('combobox', { name: '鼠房', exact: true }).click()
+  await roomMenu.getByRole('option', { name: '东五', exact: true }).click()
+  await queried(() => roomMenu.getByRole('button', { name: '应用筛选', exact: true }).click())
+  assert.equal(queries.at(-1).room, '东五')
+  assert.ok((await page.locator('.mouse-room-search').textContent()).includes('东五'))
+  const clearRoomMenu = await openColumnFilter('当前笼位与鼠房')
+  await queried(() => clearRoomMenu.getByRole('button', { name: '清除此列', exact: true }).click())
+  assert.equal(queries.at(-1).room, undefined)
   const strainMenu = await openColumnFilter('品系 / 基因型')
   await strainMenu.getByRole('combobox', { name: '品系', exact: true }).click()
   await page.getByRole('option', { name: '5xFAD', exact: true }).click()
