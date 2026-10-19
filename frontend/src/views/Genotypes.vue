@@ -28,7 +28,7 @@
 
         <el-button type="primary" @click="searchGenotypes">查询</el-button>
 
-        <div class="ml-auto flex items-center gap-2" role="group" aria-label="基因鉴定结果排序">
+        <div class="flex items-center gap-2" role="group" aria-label="基因鉴定结果排序">
           <ArrowDownWideNarrow class="shrink-0 text-gray-500" :size="16" aria-hidden="true" />
           <el-select v-model="sortBy" size="small" style="width: 140px" aria-label="排序方式" @change="searchGenotypes">
             <el-option v-for="option in genotypeSortOptions" :key="option.value" :label="option.label" :value="option.value" />
@@ -38,7 +38,7 @@
             <el-option label="降序" value="desc" />
           </el-select>
         </div>
-        <el-button v-if="authStore.isAdmin" type="primary" plain @click="openAddDialog">
+        <el-button v-if="authStore.isAdmin" class="genotype-add-button" type="primary" plain @click="openAddDialog">
           <el-icon class="mr-1"><Plus /></el-icon> 录入鉴定结果
         </el-button>
       </div>
@@ -755,6 +755,10 @@ onMounted(() => {
   overflow-y: auto;
 }
 .genotype-toolbar, .genotype-filters { flex-wrap: wrap; gap: 12px; }
+.genotype-filters .genotype-add-button {
+  margin-left: auto;
+  flex-shrink: 0;
+}
 .genotype-form :deep(.el-form-item__label) {
   white-space: nowrap;
 }
