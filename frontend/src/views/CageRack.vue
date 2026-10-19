@@ -12,14 +12,22 @@
           <el-icon class="mr-1"><Setting /></el-icon> 管理鼠房
         </el-button>
       </div>
-      <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="cage-room-tabs">
         <!-- Room Tabs -->
         <el-radio-group v-model="activeRoom" @change="changeRoom">
           <el-radio-button value="">{{ activeCategory ? '本类全部鼠房' : '全部鼠房' }}</el-radio-button>
           <el-radio-button v-for="r in categoryRooms" :key="r" :value="r">{{ r }}</el-radio-button>
         </el-radio-group>
-
-        <div class="flex flex-wrap items-center gap-3">
+      </div>
+      <div class="cage-toolbar">
+        <div class="cage-toolbar-filters">
+          <el-input
+            v-model="searchCode"
+            placeholder="搜索笼号或品系"
+            clearable
+            prefix-icon="Search"
+            style="width: 200px"
+          />
           <el-select v-model="cageGenderFilter" clearable placeholder="全部鼠笼性别" style="width: 140px">
             <el-option label="♂ 雄笼" value="M" />
             <el-option label="♀ 雌笼" value="F" />
@@ -28,21 +36,11 @@
           <el-select v-model="cageCodeFilter" clearable filterable placeholder="全部笼位" style="width: 140px">
             <el-option v-for="code in cageCodeOptions" :key="code" :label="code" :value="code" />
           </el-select>
-          <el-input
-            v-model="searchCode"
-            placeholder="搜索笼号或品系"
-            clearable
-            prefix-icon="Search"
-            style="width: 200px"
-          />
           <el-checkbox v-model="onlyWithMice">仅显示有鼠笼位</el-checkbox>
-          <el-button v-if="authStore.isAdmin" type="primary" plain @click="openAddCageDialog">
-            <el-icon class="mr-1"><Plus /></el-icon> 新建笼位
-          </el-button>
-          <el-button :loading="exporting" @click="handleExport">
-            <el-icon class="mr-1"><Download /></el-icon> 导出笼位
-          </el-button>
         </div>
+        <el-button v-if="authStore.isAdmin" class="cage-add-button" type="primary" plain @click="openAddCageDialog">
+          <el-icon class="mr-1"><Plus /></el-icon> 新建笼位
+        </el-button>
       </div>
     </div>
 
@@ -629,7 +627,7 @@
 <script setup>
 import { ref, shallowRef, reactive, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { cagesApi, miceApi, importExportApi, settingsApi } from '@/api'
+import { cagesApi, miceApi, settingsApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { useClaimerColors } from '@/composables/useClaimerColors'
 import SetOwnerDialog from '@/components/SetOwnerDialog.vue'
@@ -651,7 +649,6 @@ const authStore = useAuthStore()
 const { getClaimerTagStyle, fetchClaimerColors } = useClaimerColors()
 
 const loading = ref(false)
-const exporting = ref(false)
 const cagesList = shallowRef([])
 const currentPage = ref(1)
 const pageSize = 24
@@ -1513,16 +1510,6 @@ async function handleDeleteCage(id) {
   }
 }
 
-async function handleExport() {
-  if (exporting.value) return
-  exporting.value = true
-  try {
-    await importExportApi.exportCages()
-  } finally {
-    exporting.value = false
-  }
-}
-
 async function openRequestedCage(id) {
   const requestedId = Number(id)
   if (!requestedId) return
@@ -1616,6 +1603,11 @@ onMounted(async () => {
 .room-settings-button {
   margin-left: auto;
 }
+
+.cage-room-tabs { margin-bottom: 12px; }
+.cage-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.cage-toolbar-filters { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; gap: 12px; min-width: 0; }
+.cage-add-button { margin-left: auto; }
 
 .cage-card {
   transition: transform 0.15s, box-shadow 0.15s;
