@@ -52,7 +52,7 @@ class ImportDuplicateTests(unittest.TestCase):
         workbook.active.append(["2026-10-02", "测试品系", None, "F", None, "D002"])
         third = self.import_book(workbook)
         self.assertEqual(third["mice_imported"], 1)
-        added = [item for item in third["report"]["records"] if item["status"] == "added"]
+        added = [item for item in third["report"]["records"] if item["status"] == "added" and item["type"] == "小鼠"]
         self.assertEqual([(item["identifier"], item["sheet"], item["row"]) for item in added], [("D002", "小鼠档案", 4)])
         self.assertEqual(self.db.query(Mouse).count(), 2)
 
@@ -200,6 +200,32 @@ class ImportDuplicateTests(unittest.TestCase):
         self.assertEqual(second["report"]["summary"]["updated"], 0)
         self.assertEqual(self.db.query(GenotypeRecord).count(), 1)
         self.assertEqual(self.db.query(TransferLog).filter_by(action_type="导入数据").count(), 1)
+
+    def test_archive_blank_results_are_registered_and_reimported_without_duplicates(self):
+        workbook = self.archive_book()
+        workbook.active.append([None, "5xFAD", "2026-09-18", "F", "H087M+H091F、H092F", "H489", None, None, None, "AI5"])
+        workbook.active.append(["/", "fos-GFP", "2026-09-18", "M", "D561M+D557F", "H494", "/", " ", None, "AI7"])
+        first = self.import_book(workbook)
+        self.assertEqual(first["errors"], [])
+        self.assertEqual(first["genotypes_imported"], 2)
+        records = self.db.query(GenotypeRecord).order_by(GenotypeRecord.mouse_code).all()
+        self.assertEqual([r.mouse_code for r in records], ["H489", "H494"])
+        self.assertTrue(all(r.genotype_1 is None and r.genotype_2 is None and r.test_date is None for r in records))
+        self.assertEqual((records[0].dob, records[0].gender, records[0].parents, records[0].notes),
+                         ("2026-09-18", "F", "H087M+H091F、H092F", "AI5"))
+        self.assertTrue(all(r.mouse_id is not None for r in records))
+        second = self.import_book(workbook)
+        self.assertEqual(second["report"]["summary"]["added"], 0)
+        self.assertEqual(second["report"]["summary"]["updated"], 0)
+        self.assertEqual(self.db.query(GenotypeRecord).count(), 2)
+
+    def test_blank_archive_does_not_clear_manually_recorded_results(self):
+        mouse = Mouse(mouse_code="H489", genotype_1="HET", genotype_2="WT", test_date="2026-10-01")
+        self.db.add(mouse)
+        self.db.commit()
+        self.import_book(self.archive_book("H489"))
+        self.assertEqual((mouse.genotype_1, mouse.genotype_2, mouse.test_date), ("HET", "WT", "2026-10-01"))
+        self.assertIsNone(self.db.query(GenotypeRecord).one().genotype_1)
 
     def test_archive_and_genotype_sheets_share_empty_value_deduplication(self):
         mouse = Mouse(mouse_code="H515", source_room="江湾发育所")

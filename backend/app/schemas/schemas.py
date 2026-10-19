@@ -1,4 +1,4 @@
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from pydantic import BaseModel, Field
 from datetime import datetime
 
@@ -65,6 +65,11 @@ class GenotypeRecordUpdate(BaseModel):
     genotype_3: Optional[str] = None
     op_record: Optional[str] = None
     notes: Optional[str] = None
+
+class GenotypeBatchFill(BaseModel):
+    record_ids: List[int] = Field(min_length=1, max_length=500)
+    field: Literal["genotype_1", "genotype_2", "genotype_3"]
+    value: Optional[str] = Field(default=None, max_length=64)
 
 class GenotypeRecordResponse(GenotypeRecordBase):
     id: int

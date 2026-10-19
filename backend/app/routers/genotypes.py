@@ -1,5 +1,5 @@
 import datetime
-from typing import Annotated, List, Optional
+from typing import Annotated, List, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import case, func, or_
@@ -7,10 +7,13 @@ from sqlalchemy import case, func, or_
 from backend.app.database import get_db
 from backend.app.models.models import GenotypeRecord, Mouse, User
 from backend.app.schemas.schemas import (
-    GenotypeRecordCreate, GenotypeRecordUpdate, GenotypeRecordResponse
+    GenotypeBatchFill, GenotypeRecordCreate, GenotypeRecordUpdate, GenotypeRecordResponse
 )
 from backend.app.auth import require_auth, require_admin
-from backend.app.services.genotype_service import sync_mouse_genotype_summary as _sync_mouse_genotype_summary
+from backend.app.services.genotype_service import (
+    genotype_result_condition, has_genotype_result, normalize_genotype_value,
+    sync_mouse_genotype_summary as _sync_mouse_genotype_summary,
+)
 
 router = APIRouter(prefix="/api/genotypes", tags=["Genotypes"])
 
@@ -27,11 +30,17 @@ def list_genotypes(
     genotype_2_values: Annotated[Optional[List[str]], Query()] = None,
     genotype_3_values: Annotated[Optional[List[str]], Query()] = None,
     parents: Optional[str] = None,
+    test_status: Optional[Literal["pending", "tested"]] = None,
+    sort_by: Literal["added", "test_date"] = "added",
+    sort_order: Literal["asc", "desc"] = "desc",
     limit: int = Query(200, ge=1, le=1000),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_auth)
 ):
     query = db.query(GenotypeRecord)
+    if test_status:
+        condition = genotype_result_condition()
+        query = query.filter(condition if test_status == "tested" else ~condition)
     if keyword:
         k = f"%{keyword.strip()}%"
         query = query.filter(
@@ -87,9 +96,15 @@ def list_genotypes(
         )
         order_clauses.append(relevance)
 
-    # Order so tested records with valid test_date and parents appear first
-    order_date = case((or_(GenotypeRecord.test_date.is_(None), GenotypeRecord.test_date == ""), 1), else_=0)
-    order_clauses.extend([order_date, GenotypeRecord.test_date.desc(), GenotypeRecord.id.desc()])
+    # IDs retain insertion order, including top-to-bottom Excel registration.
+    # Editing outcomes or test dates must not change that order.
+    if sort_by == "test_date":
+        missing_date = func.coalesce(func.trim(GenotypeRecord.test_date), "") == ""
+        order_clauses.append(case((missing_date, 1), else_=0))
+        order_clauses.append(
+            GenotypeRecord.test_date.asc() if sort_order == "asc" else GenotypeRecord.test_date.desc()
+        )
+    order_clauses.append(GenotypeRecord.id.asc() if sort_order == "asc" else GenotypeRecord.id.desc())
     query = query.order_by(*order_clauses)
 
     if page is not None:
@@ -190,7 +205,10 @@ def _add_genotype_record(data, db, current_user):
     gt = GenotypeRecord(
         mouse_code=clean_code,
         mouse_id=mouse.id if mouse else None,
-        test_date=data.test_date or datetime.date.today().strftime("%Y-%m-%d"),
+        test_date=data.test_date or (
+            datetime.date.today().isoformat()
+            if has_genotype_result(data.genotype_1, data.genotype_2, data.genotype_3) else None
+        ),
         strain=data.strain or (mouse.strain if mouse else ""),
         dob=data.dob or (mouse.dob if mouse else None),
         gender=data.gender or (mouse.gender if mouse else None),
@@ -210,7 +228,8 @@ def _add_genotype_record(data, db, current_user):
         if data.gender and mouse.gender == "未知":
             mouse.gender = data.gender
         db.flush()
-        _sync_mouse_genotype_summary(mouse, db)
+        if has_genotype_result(gt.genotype_1, gt.genotype_2, gt.genotype_3):
+            _sync_mouse_genotype_summary(mouse, db)
 
     return gt
 
@@ -236,6 +255,48 @@ def create_genotype_records(
         db.refresh(record)
     return records
 
+@router.put("/batch-fill")
+def fill_genotype_records(
+    data: GenotypeBatchFill,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Fill one result column atomically, preserving all other record fields."""
+    ids = set(data.record_ids)
+    records = db.query(GenotypeRecord).filter(GenotypeRecord.id.in_(ids)).all()
+    if len(records) != len(ids):
+        raise HTTPException(status_code=404, detail="部分鉴定记录不存在，请刷新后重试")
+    value = normalize_genotype_value(data.value)
+    codes = set()
+    try:
+        for record in records:
+            was_tested = has_genotype_result(record.genotype_1, record.genotype_2, record.genotype_3)
+            setattr(record, data.field, value)
+            is_tested = has_genotype_result(record.genotype_1, record.genotype_2, record.genotype_3)
+            if was_tested or is_tested:
+                codes.add(record.mouse_code)
+            if not was_tested and is_tested and not record.test_date:
+                record.test_date = datetime.date.today().isoformat()
+        db.flush()
+        for mouse in db.query(Mouse).filter(Mouse.mouse_code.in_(codes)).all():
+            _sync_mouse_genotype_summary(mouse, db)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {
+        "updated": len(records),
+        "items": [
+            {
+                "id": record.id, "test_date": record.test_date,
+                "genotype_1": record.genotype_1, "genotype_2": record.genotype_2,
+                "genotype_3": record.genotype_3,
+            }
+            for record in records
+        ],
+    }
+
+
 @router.put("/{genotype_id}", response_model=GenotypeRecordResponse)
 def update_genotype_record(
     genotype_id: int,
@@ -247,15 +308,20 @@ def update_genotype_record(
     if not gt:
         raise HTTPException(status_code=404, detail="鉴定记录未找到")
 
+    was_tested = has_genotype_result(gt.genotype_1, gt.genotype_2, gt.genotype_3)
     update_dict = data.model_dump(exclude_unset=True)
     for k, v in update_dict.items():
         setattr(gt, k, v)
 
+    is_tested = has_genotype_result(gt.genotype_1, gt.genotype_2, gt.genotype_3)
+    if not was_tested and is_tested and not gt.test_date:
+        gt.test_date = datetime.date.today().isoformat()
     db.flush()
     mouse = gt.mouse or db.query(Mouse).filter(Mouse.mouse_code == gt.mouse_code).first()
     if mouse and "dob" in update_dict:
         mouse.dob = update_dict["dob"] or None
-    _sync_mouse_genotype_summary(mouse, db)
+    if was_tested or is_tested:
+        _sync_mouse_genotype_summary(mouse, db)
     db.commit()
     db.refresh(gt)
     return gt
@@ -269,9 +335,11 @@ def delete_genotype_record(
     gt = db.query(GenotypeRecord).filter(GenotypeRecord.id == genotype_id).first()
     if not gt:
         raise HTTPException(status_code=404, detail="鉴定记录未找到")
+    was_tested = has_genotype_result(gt.genotype_1, gt.genotype_2, gt.genotype_3)
     mouse = gt.mouse or db.query(Mouse).filter(Mouse.mouse_code == gt.mouse_code).first()
     db.delete(gt)
     db.flush()
-    _sync_mouse_genotype_summary(mouse, db)
+    if was_tested:
+        _sync_mouse_genotype_summary(mouse, db)
     db.commit()
     return {"message": "鉴定记录已删除"}

@@ -4,11 +4,18 @@
       <div>
         <div class="text-base font-bold text-gray-800">小鼠基因型鉴定结果档案</div>
         <div class="text-xs text-gray-500 mt-1">
-          记录实验室各批次小鼠 PCR 基因鉴定结果、父母系谱配对及等位基因型分析
+          先登记待检验小鼠，再填写结果；支持批量编号和向下填充基因型
         </div>
       </div>
 
       <div class="genotype-filters flex items-center gap-3">
+        <el-select v-model="filters.sort" style="width: 185px" aria-label="鉴定记录排序" @change="searchGenotypes">
+          <el-option v-for="option in genotypeSortOptions" :key="option.value" :label="option.label" :value="option.value" />
+        </el-select>
+        <el-select v-model="filters.test_status" placeholder="全部鉴定状态" clearable style="width: 150px" @change="searchGenotypes">
+          <el-option label="待检验" value="pending" />
+          <el-option label="已有结果" value="tested" />
+        </el-select>
         <el-input
           v-model="filters.keyword"
           placeholder="搜索耳标、品系、父母系谱"
@@ -21,15 +28,26 @@
 
         <el-button type="primary" @click="searchGenotypes">查询</el-button>
 
-        <el-button v-if="authStore.isAdmin" type="success" plain @click="openAddDialog">
+        <el-button v-if="authStore.isAdmin" type="primary" plain @click="openAddDialog(true)">
+          <el-icon class="mr-1"><Plus /></el-icon> 登记待检验小鼠
+        </el-button>
+        <el-button v-if="authStore.isAdmin" type="success" plain @click="openAddDialog(false)">
           <el-icon class="mr-1"><Plus /></el-icon> 录入鉴定结果
         </el-button>
       </div>
     </div>
 
     <!-- Genotype Table -->
+    <div v-if="authStore.isAdmin" class="text-xs text-gray-500 mb-2" role="status">
+      {{ gridSaving ? '正在保存基因型…' : fillDrag ? `松开鼠标，将填充 ${Math.abs(fillDrag.endIndex - fillDrag.startIndex)} 条记录` : '双击 Genotype 单元格填写或选择结果，再拖动右下角蓝色方块向下填充，覆盖该列原值并自动保存。填充限当前页；编辑时保持行位置，查询或翻页后刷新筛选。' }}
+    </div>
     <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-      <el-table v-loading="loading" :data="genotypes" stripe style="width: 100%">
+      <el-table v-loading="loading || gridSaving" :data="genotypes" row-key="id" stripe style="width: 100%">
+        <el-table-column label="鉴定状态" width="100">
+          <template #default="{ row }">
+            <el-tag size="small" :type="hasGenotypeResult(row) ? 'success' : 'warning'">{{ hasGenotypeResult(row) ? '已有结果' : '待检验' }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="dob" label="出生日期" width="110">
           <template #default="{ row }">
             <span class="font-mono text-xs text-gray-600">{{ row.dob || '-' }}</span>
@@ -76,57 +94,30 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="genotype_1" label="Genotype 1" width="150">
+        <el-table-column v-for="(field, index) in genotypeFields" :key="field" :prop="field" :label="`Genotype ${index + 1}`" width="175">
           <template #header>
             <GenotypeFilterHeader
-              label="Genotype 1"
-              :model-value="filters.genotype_1"
-              :options="existingGenotypeOptions.genotype_1"
+              :label="`Genotype ${index + 1}`"
+              :model-value="filters[field]"
+              :options="existingGenotypeOptions[field]"
               :loading="optionsLoading"
-              @update:model-value="values => updateGenotypeFilter('genotype_1', values)"
+              @update:model-value="values => updateGenotypeFilter(field, values)"
             />
           </template>
-          <template #default="{ row }">
-            <el-tag
-              v-if="row.genotype_1"
-              size="small"
-              :type="row.genotype_1.includes('阳') || row.genotype_1.includes('纯') || row.genotype_1.includes('HET') ? 'success' : 'info'"
-            >
-              {{ row.genotype_1 }}
-            </el-tag>
-            <span v-else class="text-gray-300 text-xs">-</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="genotype_2" label="Genotype 2" width="150">
-          <template #header>
-            <GenotypeFilterHeader
-              label="Genotype 2"
-              :model-value="filters.genotype_2"
-              :options="existingGenotypeOptions.genotype_2"
-              :loading="optionsLoading"
-              @update:model-value="values => updateGenotypeFilter('genotype_2', values)"
+          <template #default="{ row, $index }">
+            <GenotypeGridCell
+              :value="row[field] || ''"
+              :options="existingGenotypeOptions[field]"
+              :tag-type="index === 1 ? 'warning' : index === 2 ? 'info' : /阳|纯|HET/.test(row[field] || '') ? 'success' : 'info'"
+              :editable="authStore.isAdmin"
+              :disabled="gridSaving || loading || !!fillDrag"
+              :active="activeCell?.id === row.id && activeCell?.field === field"
+              :in-fill-range="isInFillRange(field, $index)"
+              @activate="activateCell(row.id, field)"
+              @save="value => saveGridValues([row.id], field, value)"
+              @fill-start="event => startFill(field, $index, event)"
+              @fill-enter="extendFill(field, $index)"
             />
-          </template>
-          <template #default="{ row }">
-            <el-tag v-if="row.genotype_2" size="small" type="warning">{{ row.genotype_2 }}</el-tag>
-            <span v-else class="text-gray-300 text-xs">-</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="genotype_3" label="Genotype 3" width="150">
-          <template #header>
-            <GenotypeFilterHeader
-              label="Genotype 3"
-              :model-value="filters.genotype_3"
-              :options="existingGenotypeOptions.genotype_3"
-              :loading="optionsLoading"
-              @update:model-value="values => updateGenotypeFilter('genotype_3', values)"
-            />
-          </template>
-          <template #default="{ row }">
-            <el-tag v-if="row.genotype_3" size="small" type="info">{{ row.genotype_3 }}</el-tag>
-            <span v-else class="text-gray-300 text-xs">-</span>
           </template>
         </el-table-column>
 
@@ -144,7 +135,7 @@
 
         <el-table-column v-if="authStore.isAdmin" label="操作" width="120" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" type="info" link @click="openEditDialog(row)">编辑</el-button>
+            <el-button size="small" type="info" link @click="openEditDialog(row)">{{ hasGenotypeResult(row) ? '编辑' : '填写结果' }}</el-button>
             <el-popconfirm title="确定删除该条鉴定记录吗？" @confirm="handleDelete(row.id)">
               <template #reference>
                 <el-button size="small" type="danger" link>删除</el-button>
@@ -171,7 +162,8 @@
     </div>
 
     <!-- Add/Edit Genotype Dialog -->
-    <el-dialog v-model="showDialog" :title="isEdit ? '编辑基因鉴定结果' : '录入小鼠基因鉴定'" width="540px" align-center>
+    <el-dialog v-model="showDialog" :title="isEdit ? '编辑基因鉴定记录' : registeringPending ? '登记待检验小鼠' : '录入小鼠基因鉴定'" width="540px" align-center>
+      <div v-if="registeringPending && !isEdit" class="text-xs text-gray-500 mb-4">填写编号和基本信息即可保存，基因型和鉴定日期可留空；检验后可在表格填写结果并向下填充。</div>
       <el-form :model="form" label-width="110px" class="genotype-form" :disabled="saving">
         <template v-if="!isEdit">
           <el-form-item label="新增数量" required>
@@ -248,12 +240,14 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { genotypesApi, miceApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import MouseDetailModal from '@/components/MouseDetailModal.vue'
 import PedigreeTags from '@/components/PedigreeTags.vue'
 import GenotypeFilterHeader from '@/components/GenotypeFilterHeader.vue'
+import GenotypeGridCell from '@/components/GenotypeGridCell.vue'
+import { hasGenotypeResult } from '@/utils/mouseDisplay'
 import { generateSequentialMouseCodes } from '@/utils/mouseCodes'
 import { ElMessage } from 'element-plus'
 
@@ -266,14 +260,30 @@ const page = ref(1)
 const pageSize = ref(50)
 const optionsLoading = ref(false)
 const genotypeOptions = reactive({ genotype_1: [], genotype_2: [], genotype_3: [] })
+const genotypeFields = ['genotype_1', 'genotype_2', 'genotype_3']
+const genotypeSortOptions = [
+  { value: 'added_desc', label: '添加顺序：倒序', sortBy: 'added', sortOrder: 'desc' },
+  { value: 'added_asc', label: '添加顺序：正序', sortBy: 'added', sortOrder: 'asc' },
+  { value: 'test_date_desc', label: '鉴定日期：从新到旧', sortBy: 'test_date', sortOrder: 'desc' },
+  { value: 'test_date_asc', label: '鉴定日期：从旧到新', sortBy: 'test_date', sortOrder: 'asc' }
+]
+const savedSort = localStorage.getItem('genotype_sort')
+const gridSaving = ref(false)
+const activeCell = ref(null)
+const fillDrag = ref(null)
+const registeringPending = ref(false)
 let loadRequestId = 0
 
 const filters = reactive({
   keyword: '',
+  test_status: '',
+  sort: genotypeSortOptions.some(option => option.value === savedSort) ? savedSort : 'added_desc',
   genotype_1: [],
   genotype_2: [],
   genotype_3: []
 })
+const selectedSort = computed(() => genotypeSortOptions.find(option => option.value === filters.sort))
+watch(() => filters.sort, value => localStorage.setItem('genotype_sort', value))
 
 // Show values already visible in the table while the full option list loads.
 const existingGenotypeOptions = computed(() => Object.fromEntries(
@@ -409,6 +419,7 @@ async function loadGenotypeOptions() {
 }
 
 async function loadGenotypes() {
+  cancelFill()
   const requestId = ++loadRequestId
   loading.value = true
   try {
@@ -416,6 +427,9 @@ async function loadGenotypes() {
       page: page.value,
       page_size: pageSize.value,
       keyword: filters.keyword || undefined,
+      test_status: filters.test_status || undefined,
+      sort_by: selectedSort.value.sortBy,
+      sort_order: selectedSort.value.sortOrder,
       genotype_1_values: filters.genotype_1.length ? filters.genotype_1 : undefined,
       genotype_2_values: filters.genotype_2.length ? filters.genotype_2 : undefined,
       genotype_3_values: filters.genotype_3.length ? filters.genotype_3 : undefined
@@ -436,7 +450,81 @@ async function loadGenotypes() {
   }
 }
 
-function openAddDialog() {
+function activateCell(id, field) {
+  if (!gridSaving.value && !fillDrag.value) activeCell.value = { id, field }
+}
+
+async function saveGridValues(recordIds, field, value) {
+  if (gridSaving.value || loading.value || !authStore.isAdmin) return
+  gridSaving.value = true
+  try {
+    const result = await genotypesApi.fillGenotypes({ record_ids: recordIds, field, value })
+    // Keep the source and surrounding rows stable for the next fill gesture.
+    const updates = new Map(result.items.map(record => [record.id, record]))
+    for (const row of genotypes.value) {
+      if (updates.has(row.id)) Object.assign(row, updates.get(row.id))
+    }
+    ElMessage.success(`已保存 ${result.updated} 条基因型`)
+    await loadGenotypeOptions()
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '基因型保存失败，请重试')
+  } finally {
+    gridSaving.value = false
+  }
+}
+
+function startFill(field, rowIndex, event) {
+  if (event.button !== 0 || gridSaving.value || loading.value || !authStore.isAdmin) return
+  cancelFill()
+  const row = genotypes.value[rowIndex]
+  activeCell.value = { id: row.id, field }
+  fillDrag.value = {
+    field, startIndex: rowIndex, endIndex: rowIndex, value: row[field] || '',
+    previousUserSelect: document.body.style.userSelect
+  }
+  document.body.style.userSelect = 'none'
+  document.addEventListener('pointerup', finishFill)
+  document.addEventListener('pointercancel', cancelFill)
+  document.addEventListener('keydown', handleFillKeydown)
+}
+
+function extendFill(field, rowIndex) {
+  if (fillDrag.value?.field === field) fillDrag.value.endIndex = rowIndex
+}
+
+function isInFillRange(field, rowIndex) {
+  const drag = fillDrag.value
+  return drag?.field === field && rowIndex >= Math.min(drag.startIndex, drag.endIndex)
+    && rowIndex <= Math.max(drag.startIndex, drag.endIndex)
+}
+
+function finishFill() {
+  const drag = fillDrag.value
+  if (!drag) return
+  const ids = genotypes.value
+    .slice(Math.min(drag.startIndex, drag.endIndex), Math.max(drag.startIndex, drag.endIndex) + 1)
+    .filter(row => row.id !== activeCell.value?.id)
+    .map(row => row.id)
+  cancelFill()
+  if (ids.length) saveGridValues(ids, drag.field, drag.value)
+}
+
+function handleFillKeydown(event) {
+  if (event.key === 'Escape') cancelFill()
+}
+
+function cancelFill() {
+  if (fillDrag.value) document.body.style.userSelect = fillDrag.value.previousUserSelect
+  fillDrag.value = null
+  document.removeEventListener('pointerup', finishFill)
+  document.removeEventListener('pointercancel', cancelFill)
+  document.removeEventListener('keydown', handleFillKeydown)
+}
+
+onBeforeUnmount(cancelFill)
+
+function openAddDialog(pending = false) {
+  registeringPending.value = pending
   manualFields.clear()
   isEdit.value = false
   currentEditId.value = null
@@ -444,7 +532,7 @@ function openAddDialog() {
   startCode.value = ''
   Object.assign(form, {
     mouse_code: '',
-    test_date: new Date().toISOString().split('T')[0],
+    test_date: pending ? '' : new Date().toLocaleDateString('sv-SE'),
     dob: '',
     strain: '',
     gender: '',
@@ -459,6 +547,7 @@ function openAddDialog() {
 }
 
 function openEditDialog(row) {
+  registeringPending.value = false
   isEdit.value = true
   currentEditId.value = row.id
   Object.assign(form, {
@@ -466,7 +555,7 @@ function openEditDialog(row) {
     test_date: row.test_date || '',
     dob: row.dob || '',
     strain: row.strain || '',
-    gender: row.gender || 'M',
+    gender: row.gender || '',
     parents: row.parents || '',
     genotype_1: row.genotype_1 || '',
     genotype_2: row.genotype_2 || '',
@@ -528,6 +617,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.genotype-toolbar, .genotype-filters { flex-wrap: wrap; gap: 12px; }
 .genotype-form :deep(.el-form-item__label) {
   white-space: nowrap;
 }

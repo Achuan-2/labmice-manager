@@ -434,16 +434,15 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
                         if g2 and not mouse.genotype_2: mouse.genotype_2 = g2
                         if not mouse.source_room: mouse.source_room = "江湾发育所"
                     track_import(db, mouse)
-                    # Archive sheets also contain real PCR results, even when the date is '/'.
-                    if any((g1, g2, g3)):
-                        gt_record, created = upsert_imported_genotype(
-                            db, mouse, test_date=test_date, strain=strain, dob=dob, gender=gender,
-                            parents=parents, genotype_1=g1, genotype_2=g2, genotype_3=g3,
-                            op_record=op_rec, notes=notes,
-                        )
-                        results["genotypes_imported"] += int(created)
-                        track_import(db, gt_record)
-                        sync_mouse_genotype_summary(mouse, db, preserve_empty_values=True)
+                    # Keep pending rows too, so results can be filled in after registration.
+                    gt_record, created = upsert_imported_genotype(
+                        db, mouse, test_date=test_date, strain=strain, dob=dob, gender=gender,
+                        parents=parents, genotype_1=g1, genotype_2=g2, genotype_3=g3,
+                        op_record=op_rec, notes=notes,
+                    )
+                    results["genotypes_imported"] += int(created)
+                    track_import(db, gt_record)
+                    sync_mouse_genotype_summary(mouse, db, preserve_empty_values=True)
                 except Exception as e:
                     rollback_import_row(db)
                     results["errors"].append(f"{name} 第{row_number}行解析错误: {str(e)}")

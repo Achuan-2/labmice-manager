@@ -70,10 +70,10 @@ class ImportReportApiTests(unittest.TestCase):
         self.assertEqual(result["file_summaries"][1]["imported_count"], 0)
         mice = [row for row in result["details"]["report"]["records"] if row["type"] == "小鼠"]
         self.assertEqual([(row["status"], row["filename"]) for row in mice], [("added", "first.xlsx"), ("skipped", "second.xlsx")])
-        self.assertIn("重复跳过 1 项", result["message"])
+        self.assertIn("重复跳过 2 项", result["message"])
         repeat = self.client.post("/api/import-export/upload", files={"files": ("first.xlsx", content)}).json()
         self.assertEqual(repeat["imported_count"], 0)
-        self.assertEqual(repeat["details"]["report"]["summary"]["skipped"], 1)
+        self.assertEqual(repeat["details"]["report"]["summary"]["skipped"], 2)
         logs = self.client.get("/api/transfers", params={"action_type": "导入数据"}).json()
         self.assertEqual(logs["total"], 1)
         log = logs["items"][0]
@@ -119,6 +119,22 @@ class ImportReportApiTests(unittest.TestCase):
         self.assertEqual(listing["total"], 1)
         repeat = self.client.post("/api/import-export/upload", files={"files": ("archive.xlsx", content)}).json()
         self.assertEqual(repeat["details"]["genotypes_imported"], 0)
+
+    def test_excel_row_order_is_reversed_by_default_even_with_mixed_dates_and_blank_results(self):
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = "小鼠档案"
+        sheet.append(["测试日期", "品系", "DOB", "性别", "父母", "编号", "Genotype 1", "Genotype 2"])
+        for code, date, result in (("H489", "2026-10-18", "WT"), ("H490", "2026-09-01", "HET"), ("H491", None, None)):
+            sheet.append([date, "5xFAD", None, "F", None, code, result])
+        stream = io.BytesIO()
+        workbook.save(stream)
+        response = self.client.post("/api/import-export/upload", files={"files": ("ordered.xlsx", stream.getvalue())})
+        self.assertEqual(response.status_code, 200)
+        default = self.client.get('/api/genotypes', params={"page": 1}).json()
+        by_date = self.client.get('/api/genotypes', params={"page": 1, "sort_by": "test_date"}).json()
+        self.assertEqual([r["mouse_code"] for r in default["items"]], ["H491", "H490", "H489"])
+        self.assertEqual([r["mouse_code"] for r in by_date["items"]], ["H489", "H490", "H491"])
 
 
 if __name__ == "__main__":

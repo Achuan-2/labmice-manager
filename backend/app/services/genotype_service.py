@@ -9,6 +9,19 @@ from backend.app.models.models import GenotypeRecord, Mouse
 
 
 EMPTY_GENOTYPE_VALUES = ("", "/", "-", "无", "None", "nan")
+PENDING_GENOTYPE_VALUES = (*EMPTY_GENOTYPE_VALUES, "待检验", "待鉴定", "待测", "未测", "未鉴定")
+
+
+def has_genotype_result(*values) -> bool:
+    return any(str(value).strip() not in PENDING_GENOTYPE_VALUES for value in values if value is not None)
+
+
+def genotype_result_condition():
+    """A record is tested once at least one result column contains an outcome."""
+    return or_(*(
+        func.coalesce(func.trim(getattr(GenotypeRecord, field)), "").notin_(PENDING_GENOTYPE_VALUES)
+        for field in ("genotype_1", "genotype_2", "genotype_3")
+    ))
 
 
 def normalize_genotype_value(value):
@@ -61,6 +74,7 @@ def sync_mouse_genotype_summary(
             GenotypeRecord.mouse_id == mouse.id,
             GenotypeRecord.mouse_code == mouse.mouse_code,
         ))
+        .filter(genotype_result_condition())
         .order_by(GenotypeRecord.test_date.desc(), GenotypeRecord.id.desc())
         .first()
     )
@@ -68,7 +82,6 @@ def sync_mouse_genotype_summary(
         value = getattr(latest, field) if latest else None
         if (
             preserve_empty_values
-            and normalize_genotype_value(getattr(mouse, field)) is None
             and normalize_genotype_value(value) is None
         ):
             continue

@@ -115,6 +115,7 @@ export const transferRequestsApi = {
 }
 
 export const genotypesApi = {
+  fillGenotypes: (data) => api.put('/genotypes/batch-fill', data),
   listGenotypes: (params) => api.get('/genotypes', { params, paramsSerializer: { indexes: null } }),
   getFilterOptions: () => api.get('/genotypes/filter-options'),
   getByMouse: (mouseCode) => api.get(`/genotypes/by-mouse/${mouseCode}`),
