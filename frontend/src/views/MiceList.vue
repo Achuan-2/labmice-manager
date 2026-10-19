@@ -14,6 +14,10 @@
         aria-label="快捷鼠房搜索" @change="handleSearch">
         <el-option v-for="room in roomOptions" :key="room" :value="room" :label="room" />
       </el-select>
+      <el-select v-model="filters.status" class="mouse-status-search" filterable clearable placeholder="全部状态"
+        aria-label="快捷状态筛选" @change="handleSearch">
+        <el-option v-for="status in ALL_STATUSES" :key="status.value" :value="status.value" :label="status.label" />
+      </el-select>
     </div>
 
     <!-- Action Bar -->
@@ -1064,6 +1068,7 @@ onMounted(() => {
 .mouse-search-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .mouse-keyword-search { flex: 1 1 280px; max-width: 420px; }
 .mouse-room-search { width: 220px; max-width: 100%; }
+.mouse-status-search { width: 180px; max-width: 100%; }
 
 .parent-reference:hover {
   box-shadow: 0 0 0 2px #d8b4fe;
