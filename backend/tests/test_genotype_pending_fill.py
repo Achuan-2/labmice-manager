@@ -54,6 +54,71 @@ class GenotypePendingFillTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
 
+    def check_entries(self, *codes):
+        response = self.client.post("/api/genotypes/entry-check", json={"mouse_codes": list(codes)})
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def test_entry_check_shows_h515_results_even_with_newer_pending_history(self):
+        self.client.post("/api/genotypes", json={
+            "mouse_code": "H515", "test_date": "2026-09-01", "genotype_1": "HET", "genotype_2": "WT",
+        })
+        self.client.post("/api/genotypes", json={"mouse_code": "H515", "test_date": "2099-01-01"})
+        entry, = self.check_entries(" H515 ")
+        self.assertEqual(entry["mouse_code"], "H515")
+        self.assertEqual(entry["tested_records"], [{
+            "test_date": "2026-09-01", "genotype_1": "HET", "genotype_2": "WT", "genotype_3": None,
+        }])
+        self.assertEqual(entry["pending_count"], 1)
+        with Session(self.engine) as db:
+            self.assertEqual(db.query(GenotypeRecord).count(), 2)
+            self.assertIsNone(db.query(Mouse).filter_by(mouse_code="H515").first())
+
+    def test_entry_check_includes_archive_only_results_and_basic_fields(self):
+        with Session(self.engine) as db:
+            mouse = db.query(Mouse).filter_by(mouse_code="H489").one()
+            mouse.genotype_1, mouse.test_date = "WT", "2026-09-01"
+            mouse.dob, mouse.parents = "2026-07-01", "P1M+P2F"
+            db.commit()
+        entry, = self.check_entries("H489")
+        self.assertEqual((entry["strain"], entry["gender"], entry["dob"], entry["parents"]),
+                         ("5xFAD", "F", "2026-07-01", "P1M+P2F"))
+        self.assertEqual(entry["tested_records"][0]["genotype_1"], "WT")
+        self.assertEqual(entry["pending_count"], 0)
+        with Session(self.engine) as db:
+            self.assertEqual(db.query(GenotypeRecord).count(), 0)
+
+    def test_entry_check_uses_exact_codes_and_finds_history_without_archive(self):
+        with Session(self.engine) as db:
+            db.add(Mouse(mouse_code="H5150", genotype_1="WT"))
+            db.add(GenotypeRecord(mouse_code="H515", genotype_3="阳性", strain="History strain"))
+            db.commit()
+        entries = self.check_entries("H51", "H515", "H5150", "New1", "H515")
+        self.assertEqual([entry["mouse_code"] for entry in entries], ["H51", "H515", "H5150", "New1"])
+        self.assertEqual(entries[0]["tested_records"], [])
+        self.assertEqual(entries[1]["tested_records"][0]["genotype_3"], "阳性")
+        self.assertEqual(entries[1]["strain"], "History strain")
+        self.assertEqual(entries[2]["tested_records"][0]["genotype_1"], "WT")
+        self.assertEqual(entries[3]["tested_records"], [])
+
+    def test_entry_check_keeps_pending_markers_separate_from_tested_results(self):
+        records = self.register()
+        self.fill([records[0]["id"]], "待测")
+        self.fill([records[1]["id"]], "/")
+        self.fill([records[2]["id"]], "阳性", "genotype_3")
+        entries = self.check_entries("H489", "H490", "H491", "H492")
+        self.assertEqual([entry["pending_count"] for entry in entries], [1, 1, 0, 1])
+        self.assertEqual([len(entry["tested_records"]) for entry in entries], [0, 0, 1, 0])
+
+    def test_entry_check_validates_batch_and_requires_authentication(self):
+        entries = self.check_entries(*(f"New{i}" for i in range(500)))
+        self.assertEqual(len(entries), 500)
+        for codes in ([], [" "], [f"New{i}" for i in range(501)]):
+            response = self.client.post("/api/genotypes/entry-check", json={"mouse_codes": codes})
+            self.assertEqual(response.status_code, 422)
+        del self.app.dependency_overrides[require_auth]
+        self.assertEqual(self.client.post("/api/genotypes/entry-check", json={"mouse_codes": ["H515"]}).status_code, 401)
+
     def test_register_fill_one_then_fill_down_updates_existing_records_and_archives(self):
         records = self.register()
         self.assertTrue(all(r["test_date"] is None and r["genotype_1"] is None for r in records))

@@ -7,7 +7,7 @@ from sqlalchemy import case, func, or_
 from backend.app.database import get_db
 from backend.app.models.models import GenotypeRecord, Mouse, User
 from backend.app.schemas.schemas import (
-    GenotypeBatchFill, GenotypeRecordCreate, GenotypeRecordUpdate, GenotypeRecordResponse
+    GenotypeBatchFill, GenotypeEntryCheck, GenotypeRecordCreate, GenotypeRecordUpdate, GenotypeRecordResponse
 )
 from backend.app.auth import require_auth, require_admin
 from backend.app.services.genotype_service import (
@@ -187,6 +187,56 @@ def get_genotypes_by_mouse(
     current_user: User = Depends(require_auth)
 ):
     return db.query(GenotypeRecord).filter(GenotypeRecord.mouse_code == mouse_code.strip()).order_by(GenotypeRecord.id.desc()).all()
+
+
+@router.post("/entry-check")
+def check_genotype_entry(
+    data: GenotypeEntryCheck,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_auth),
+):
+    """Check exact codes in one batch, including history without a mouse archive."""
+    codes = list(dict.fromkeys(code.strip() for code in data.mouse_codes))
+    if any(not code for code in codes):
+        raise HTTPException(status_code=422, detail="耳标编号不能为空")
+    mice = {mouse.mouse_code: mouse for mouse in db.query(Mouse).filter(Mouse.mouse_code.in_(codes)).all()}
+    history = {code: [] for code in codes}
+    records = (
+        db.query(GenotypeRecord)
+        .filter(GenotypeRecord.mouse_code.in_(codes))
+        .order_by(GenotypeRecord.test_date.desc(), GenotypeRecord.id.desc())
+        .all()
+    )
+    for record in records:
+        history[record.mouse_code].append(record)
+
+    entries = []
+    for code in codes:
+        mouse = mice.get(code)
+        records = history[code]
+        tested = [record for record in records if has_genotype_result(
+            record.genotype_1, record.genotype_2, record.genotype_3,
+        )]
+        # Older imports may store results only in the mouse archive.
+        if not tested and mouse and has_genotype_result(mouse.genotype_1, mouse.genotype_2):
+            tested = [mouse]
+        source = mouse or (records[0] if records else None)
+        entries.append({
+            "mouse_code": code,
+            **{field: getattr(source, field, None) for field in ("strain", "parents", "gender", "dob")},
+            "tested_records": [
+                {
+                    "test_date": record.test_date,
+                    **{field: getattr(record, field, None) for field in ("genotype_1", "genotype_2", "genotype_3")},
+                }
+                for record in tested
+            ],
+            "pending_count": sum(not has_genotype_result(
+                record.genotype_1, record.genotype_2, record.genotype_3,
+            ) for record in records),
+        })
+    return entries
+
 
 @router.post("", response_model=GenotypeRecordResponse)
 def create_genotype_record(

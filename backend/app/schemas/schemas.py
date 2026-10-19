@@ -54,6 +54,9 @@ class GenotypeRecordBase(BaseModel):
 class GenotypeRecordCreate(GenotypeRecordBase):
     pass
 
+class GenotypeEntryCheck(BaseModel):
+    mouse_codes: List[str] = Field(min_length=1, max_length=500)
+
 class GenotypeRecordUpdate(BaseModel):
     test_date: Optional[str] = None
     strain: Optional[str] = None

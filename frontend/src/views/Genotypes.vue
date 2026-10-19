@@ -180,12 +180,37 @@
               :rows="3"
               placeholder="自动生成后仍可手动调整，多个编号用中英文逗号、顿号或换行分隔"
             />
-            <div class="text-xs text-gray-500 mt-1">{{ lookupLoading ? '正在查询小鼠档案…' : '每个编号分别建立鉴定记录；品系、系谱留空时沿用各自档案。' }}</div>
+            <div class="text-xs text-gray-500 mt-1">{{ lookupLoading ? '正在查询小鼠档案和已有鉴定信息…' : '每个编号分别建立鉴定记录；品系、系谱留空时沿用各自档案。' }}</div>
           </el-form-item>
         </template>
         <el-form-item v-else label="耳标编号" required>
           <el-input v-model="form.mouse_code" disabled />
         </el-form-item>
+        <div v-if="!isEdit && lookupError" class="mb-4">
+          <el-alert :title="lookupError" type="error" :closable="false" show-icon />
+          <el-button link type="primary" @click="lookupRetry++">重新查询</el-button>
+        </div>
+        <div v-if="!isEdit && existingEntries.length" class="mb-4">
+          <el-alert
+            :title="testedEntries.length ? '以下小鼠已经有基因鉴定结果' : '以下小鼠已经登记待检验'"
+            description="请先核对已有记录；如确需再次登记，保存时需确认继续。"
+            type="warning"
+            :closable="false"
+            show-icon
+          />
+          <el-table v-if="existingResultRows.length" :data="existingResultRows" size="small" max-height="240" class="mt-2" border>
+            <el-table-column prop="mouse_code" label="耳标编号" min-width="90" />
+            <el-table-column prop="test_date" label="鉴定日期" min-width="105">
+              <template #default="{ row }">{{ row.test_date || '未填写' }}</template>
+            </el-table-column>
+            <el-table-column v-for="(field, index) in genotypeFields" :key="field" :label="`Genotype ${index + 1}`" min-width="100">
+              <template #default="{ row }">{{ row[field] || '—' }}</template>
+            </el-table-column>
+          </el-table>
+          <div v-if="pendingEntries.length" class="text-xs text-amber-700 mt-2">
+            已有待检验记录：{{ pendingEntries.map(entry => `${entry.mouse_code}（${entry.pending_count} 条）`).join('、') }}。建议在原记录填写结果，避免重复登记。
+          </div>
+        </div>
         <el-form-item v-if="isEdit || !isBatchEntry" label="出生日期">
           <el-date-picker v-model="form.dob" type="date" value-format="YYYY-MM-DD" placeholder="选择小鼠出生日期" style="width: 100%" @change="manualFields.add('dob')" />
         </el-form-item>
@@ -225,7 +250,7 @@
       </el-form>
       <template #footer>
         <el-button :disabled="saving" @click="showDialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" :disabled="lookupLoading" @click="submitForm">保存记录</el-button>
+        <el-button type="primary" :loading="saving" :disabled="lookupLoading || Boolean(lookupError)" @click="submitForm">保存记录</el-button>
       </template>
     </el-dialog>
 
@@ -249,7 +274,7 @@ import GenotypeFilterHeader from '@/components/GenotypeFilterHeader.vue'
 import GenotypeGridCell from '@/components/GenotypeGridCell.vue'
 import { hasGenotypeResult } from '@/utils/mouseDisplay'
 import { generateSequentialMouseCodes } from '@/utils/mouseCodes'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const authStore = useAuthStore()
 
@@ -299,6 +324,15 @@ const isEdit = ref(false)
 const currentEditId = ref(null)
 const saving = ref(false)
 const lookupLoading = ref(false)
+const lookupError = ref('')
+const lookupRetry = ref(0)
+const entryChecks = ref([])
+const testedEntries = computed(() => entryChecks.value.filter(entry => entry.tested_records.length))
+const pendingEntries = computed(() => entryChecks.value.filter(entry => entry.pending_count))
+const existingEntries = computed(() => entryChecks.value.filter(entry => entry.tested_records.length || entry.pending_count))
+const existingResultRows = computed(() => testedEntries.value.flatMap(entry => (
+  entry.tested_records.map(record => ({ ...record, mouse_code: entry.mouse_code }))
+)))
 const strainOptions = ref([])
 const addCount = ref(1)
 const startCode = ref('')
@@ -336,8 +370,10 @@ function updateGeneratedMouseCodes() {
   form.mouse_code = generateSequentialMouseCodes(startCode.value, addCount.value).join(', ')
 }
 
-watch(() => [form.mouse_code, showDialog.value], ([value, visible], _, onCleanup) => {
+watch(() => [form.mouse_code, showDialog.value, lookupRetry.value], ([value, visible], _, onCleanup) => {
   lookupLoading.value = false
+  lookupError.value = ''
+  entryChecks.value = []
   if (!visible || isEdit.value) return
   for (const field of ['strain', 'parents', 'gender', 'dob']) {
     if (!manualFields.has(field)) form[field] = ''
@@ -348,30 +384,22 @@ watch(() => [form.mouse_code, showDialog.value], ([value, visible], _, onCleanup
   lookupLoading.value = true
   const timer = setTimeout(async () => {
     try {
-      const mice = await Promise.all(codes.map(async code => {
-        try {
-          const mouse = await miceApi.getMouseByCode(code)
-          // The existing lookup endpoint also returns partial matches.
-          return mouse.mouse_code === code
-            ? { ...mouse, gender: ['M', 'F'].includes(mouse.gender) ? mouse.gender : '' }
-            : null
-        } catch (error) {
-          if (error.response?.status === 404) return null
-          throw error
-        }
-      }))
+      const entries = await genotypesApi.checkEntry(codes)
       if (cancelled) return
+      entryChecks.value = entries
       const lookupFields = codes.length > 1
         ? ['strain', 'parents', 'gender']
         : ['strain', 'parents', 'gender', 'dob']
       for (const field of lookupFields) {
-        const values = mice.map(mouse => mouse?.[field] || '')
+        const values = entries.map(entry => field === 'gender'
+          ? (['M', 'F'].includes(entry.gender) ? entry.gender : '')
+          : entry[field] || '')
         if (!manualFields.has(field)) {
           form[field] = values.every(value => value === values[0]) ? values[0] : ''
         }
       }
     } catch {
-      if (!cancelled) ElMessage.warning('小鼠档案查询失败，可手动填写或重新输入耳标重试')
+      if (!cancelled) lookupError.value = '小鼠档案和鉴定信息查询失败，请重新查询后再保存。'
     } finally {
       if (!cancelled) lookupLoading.value = false
     }
@@ -567,7 +595,7 @@ function openEditDialog(row) {
 }
 
 async function submitForm() {
-  if (saving.value || lookupLoading.value) return
+  if (saving.value || lookupLoading.value || lookupError.value) return
   const codes = parseCodes(form.mouse_code)
   if (!codes.length) {
     ElMessage.warning('请输入耳标编号')
@@ -583,6 +611,31 @@ async function submitForm() {
       await genotypesApi.updateGenotype(currentEditId.value, form)
       ElMessage.success('鉴定记录已更新')
     } else {
+      // Recheck on save so a newly added result cannot bypass the warning.
+      entryChecks.value = await genotypesApi.checkEntry(codes)
+      if (existingEntries.value.length) {
+        const describeCodes = entries => {
+          const codes = entries.slice(0, 10).map(entry => entry.mouse_code).join('、')
+          return entries.length > 10 ? `${codes} 等 ${entries.length} 只小鼠` : codes
+        }
+        const messages = []
+        if (testedEntries.value.length) {
+          messages.push(`${describeCodes(testedEntries.value)} 已经做过基因鉴定`)
+        }
+        if (pendingEntries.value.length) {
+          messages.push(`${describeCodes(pendingEntries.value)} 已有待检验记录`)
+        }
+        try {
+          await ElMessageBox.confirm(
+            `${messages.join('；')}。继续将新增鉴定记录，请确认是否需要再次登记。`,
+            '请确认重复登记',
+            { type: 'warning', confirmButtonText: '仍要登记', cancelButtonText: '返回核对' },
+          )
+        } catch (error) {
+          if (error === 'cancel' || error === 'close') return
+          throw error
+        }
+      }
       await genotypesApi.createGenotypes(codes.map(mouse_code => ({ ...form, mouse_code })))
       ElMessage.success(`已录入 ${codes.length} 条鉴定记录`)
     }
