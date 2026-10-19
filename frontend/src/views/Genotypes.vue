@@ -162,7 +162,7 @@
     </div>
 
     <!-- Add/Edit Genotype Dialog -->
-    <el-dialog v-model="showDialog" :title="isEdit ? '编辑基因鉴定记录' : registeringPending ? '登记待检验小鼠' : '录入小鼠基因鉴定'" width="540px" align-center>
+    <el-dialog v-model="showDialog" class="genotype-entry-dialog" :title="isEdit ? '编辑基因鉴定记录' : registeringPending ? '登记待检验小鼠' : '录入小鼠基因鉴定'" width="540px" align-center>
       <div v-if="registeringPending && !isEdit" class="text-xs text-gray-500 mb-4">填写编号和基本信息即可保存，基因型和鉴定日期可留空；检验后可在表格填写结果并向下填充。</div>
       <el-form :model="form" label-width="110px" class="genotype-form" :disabled="saving">
         <template v-if="!isEdit">
@@ -617,6 +617,19 @@ onMounted(() => {
 </script>
 
 <style scoped>
+:global(.genotype-entry-dialog) {
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+}
+:global(.genotype-entry-dialog .el-dialog__header),
+:global(.genotype-entry-dialog .el-dialog__footer) {
+  flex-shrink: 0;
+}
+:global(.genotype-entry-dialog .el-dialog__body) {
+  min-height: 0;
+  overflow-y: auto;
+}
 .genotype-toolbar, .genotype-filters { flex-wrap: wrap; gap: 12px; }
 .genotype-form :deep(.el-form-item__label) {
   white-space: nowrap;
