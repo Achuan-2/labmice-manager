@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from backend.app.database import (
     SessionLocal, BASE_DIR, create_business_tables,
     migrate_room_category, migrate_todo_fields, migrate_transfer_request_fields,
+    migrate_genotype_entry_order,
 )
 from backend.app.auth_database import AuthSessionLocal, initialize_auth_database
 from backend.app.models.models import Mouse, User, SystemSetting, Claimer, Room
@@ -48,6 +49,7 @@ initialize_auth_database(User.__table__, (SystemSetting.__table__,))
 migrate_room_category()
 migrate_todo_fields()
 migrate_transfer_request_fields()
+migrate_genotype_entry_order()
 
 app = FastAPI(
     title="课题组小鼠管理系统",

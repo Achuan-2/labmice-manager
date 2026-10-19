@@ -15,6 +15,7 @@ IMPORT_MODELS = {
     Primer: ("引物", "primers_imported"),
 }
 FIELD_LABELS = {
+    "entry_order": "添加顺序",
     "mouse_code": "小鼠编号", "cage_id": "笼位ID", "cage_code": "笼号",
     "room": "鼠房", "strain": "品系", "gender": "性别", "dob": "出生日期",
     "parents": "父母", "genotype_1": "基因型1", "genotype_2": "基因型2",

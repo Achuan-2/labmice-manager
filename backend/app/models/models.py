@@ -141,6 +141,7 @@ class GenotypeRecord(Base):
     __tablename__ = "genotype_records"
 
     id = Column(Integer, primary_key=True, index=True)
+    entry_order = Column(Integer, nullable=True)  # 独立展示顺序，可按原 Excel 恢复而不改记录 ID
     mouse_code = Column(String(64), index=True, nullable=False)  # 耳标编号
     mouse_id = Column(Integer, ForeignKey("mice.id", ondelete="CASCADE"), nullable=True, index=True)
     test_date = Column(String(32), index=True, nullable=True)  # 测试日期

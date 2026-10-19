@@ -37,6 +37,24 @@ def match_import_value(column, value):
     return func.trim(column) == value
 
 
+def next_genotype_entry_order(db: Session) -> int:
+    db.flush()
+    return (db.query(func.max(func.coalesce(GenotypeRecord.entry_order, GenotypeRecord.id))).scalar() or 0) + 1
+
+
+def align_genotype_entry_order(records) -> int:
+    """Reorder matched records within their existing slots, leaving other records in place."""
+    records = list({record.id: record for record in records}.values())
+    slots = sorted(record.entry_order if record.entry_order is not None else record.id for record in records)
+    changed = 0
+    for record, slot in zip(records, slots):
+        current = record.entry_order if record.entry_order is not None else record.id
+        if current != slot:
+            record.entry_order = slot
+            changed += 1
+    return changed
+
+
 def upsert_imported_genotype(db: Session, mouse: Mouse, **values):
     """Match date and all three outcomes, treating Excel empty markers as NULL."""
     for field in ("genotype_1", "genotype_2", "genotype_3"):
@@ -49,7 +67,10 @@ def upsert_imported_genotype(db: Session, mouse: Mouse, **values):
     ).first()
     created = record is None
     if created:
-        record = GenotypeRecord(mouse_code=mouse.mouse_code, mouse_id=mouse.id, **values)
+        record = GenotypeRecord(
+            mouse_code=mouse.mouse_code, mouse_id=mouse.id,
+            entry_order=next_genotype_entry_order(db), **values,
+        )
         db.add(record)
     else:
         if record.mouse_id is None:

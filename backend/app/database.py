@@ -63,6 +63,14 @@ def migrate_room_category():
             connection.exec_driver_sql("ALTER TABLE rooms ADD COLUMN category VARCHAR(32)")
 
 
+def migrate_genotype_entry_order(db_engine=engine):
+    """Old records retain ID order until an Excel order is explicitly restored."""
+    with db_engine.begin() as connection:
+        columns = connection.exec_driver_sql("PRAGMA table_info(genotype_records)").fetchall()
+        if columns and not any(column[1] == "entry_order" for column in columns):
+            connection.exec_driver_sql("ALTER TABLE genotype_records ADD COLUMN entry_order INTEGER")
+
+
 def migrate_transfer_request_fields():
     """Keep existing requests without a specified mouse quantity unset."""
     with engine.begin() as connection:

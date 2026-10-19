@@ -12,6 +12,7 @@ from backend.app.schemas.schemas import (
 from backend.app.auth import require_auth, require_admin
 from backend.app.services.genotype_service import (
     genotype_result_condition, has_genotype_result, normalize_genotype_value,
+    next_genotype_entry_order,
     sync_mouse_genotype_summary as _sync_mouse_genotype_summary,
 )
 
@@ -96,15 +97,18 @@ def list_genotypes(
         )
         order_clauses.append(relevance)
 
-    # IDs retain insertion order, including top-to-bottom Excel registration.
-    # Editing outcomes or test dates must not change that order.
+    # A separate order allows recovering Excel row order without renumbering IDs.
     if sort_by == "test_date":
         missing_date = func.coalesce(func.trim(GenotypeRecord.test_date), "") == ""
         order_clauses.append(case((missing_date, 1), else_=0))
         order_clauses.append(
             GenotypeRecord.test_date.asc() if sort_order == "asc" else GenotypeRecord.test_date.desc()
         )
-    order_clauses.append(GenotypeRecord.id.asc() if sort_order == "asc" else GenotypeRecord.id.desc())
+    entry_order = func.coalesce(GenotypeRecord.entry_order, GenotypeRecord.id)
+    order_clauses.extend([
+        entry_order.asc() if sort_order == "asc" else entry_order.desc(),
+        GenotypeRecord.id.asc() if sort_order == "asc" else GenotypeRecord.id.desc(),
+    ])
     query = query.order_by(*order_clauses)
 
     if page is not None:
@@ -203,6 +207,7 @@ def _add_genotype_record(data, db, current_user):
     mouse = db.query(Mouse).filter(Mouse.mouse_code == clean_code).first()
     
     gt = GenotypeRecord(
+        entry_order=next_genotype_entry_order(db),
         mouse_code=clean_code,
         mouse_id=mouse.id if mouse else None,
         test_date=data.test_date or (

@@ -16,11 +16,45 @@ from backend.app.database import get_db, get_business_tables, BASE_DIR, DB_PATH,
 from backend.app.services.database_backup import snapshot, restore_database
 from backend.app.models.models import Mouse, Cage, Claimer, TransferLog, Primer, User
 from backend.app.services.importer import import_local_excel_folder, import_single_excel_file
+from backend.app.services.genotype_order import apply_genotype_order, plan_genotype_order
 from backend.app.services.owner_service import sync_euthanasia_owner
 from backend.app.services.strain_service import normalize_strain_name
 from backend.app.auth import require_admin, require_auth
 
 router = APIRouter(prefix="/api/import-export", tags=["Import & Export"])
+
+
+@router.post('/genotype-order')
+def restore_genotype_excel_order(
+    file: UploadFile = File(...), db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    if not (file.filename or '').lower().endswith('.xlsx'):
+        raise HTTPException(status_code=400, detail='请选择原始 .xlsx 文件')
+    try:
+        workbook = openpyxl.load_workbook(file.file, data_only=True)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail='无法读取 Excel 文件') from exc
+    try:
+        records, report = plan_genotype_order(db, workbook)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        workbook.close()
+    backup_dir = Path(DATA_DIR) / 'backups'
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    safety = backup_dir / f'before_genotype_order_{datetime.datetime.now():%Y%m%d_%H%M%S_%f}.db'
+    snapshot(DB_PATH, safety)
+    try:
+        apply_genotype_order(records, report)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {
+        **report, 'safety_backup': safety.name,
+        'message': f'已按 Excel 行顺序恢复 {report["matched"]} 条鉴定记录，调整 {report["changed"]} 条排序位置',
+    }
 
 
 @router.get('/database/export')

@@ -186,6 +186,7 @@ async function downloadExcel(resource) {
 }
 
 export const importExportApi = {
+  restoreGenotypeOrder: (formData) => api.post('/import-export/genotype-order', formData),
   exportDatabase: () => downloadExcel('database'),
   restoreDatabase: (formData) => api.post('/import-export/database/restore', formData, { timeout: 300000 }),
   initLocal: () => api.post('/import-export/init-local'),

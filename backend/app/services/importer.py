@@ -12,6 +12,7 @@ from backend.app.services.owner_service import sync_euthanasia_owner
 from backend.app.services.import_audit import record_import_logs
 from backend.app.services.genotype_service import (
     normalize_genotype_value, sync_mouse_genotype_summary, upsert_imported_genotype,
+    align_genotype_entry_order,
 )
 from backend.app.services.import_report import (
     ImportReport, is_existing_import_record, iter_import_rows, rollback_import_row, track_import,
@@ -353,6 +354,7 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
         report.filename = file_label or report.filename
     sheetnames = wb.sheetnames
     processed_sheets = set()
+    genotype_order = []
 
     # These sheets are historical/reference material without a real current room.
     # Mark them as processed so they cannot fall through to a generic current-mouse import.
@@ -443,6 +445,7 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
                     results["genotypes_imported"] += int(created)
                     track_import(db, gt_record)
                     sync_mouse_genotype_summary(mouse, db, preserve_empty_values=True)
+                    genotype_order.append(gt_record)
                 except Exception as e:
                     rollback_import_row(db)
                     results["errors"].append(f"{name} 第{row_number}行解析错误: {str(e)}")
@@ -627,6 +630,7 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
                     results["genotypes_imported"] += int(created)
                     track_import(db, gt_record)
                     sync_mouse_genotype_summary(mouse, db, preserve_empty_values=True)
+                    genotype_order.append(gt_record)
                 except Exception as e:
                     rollback_import_row(db)
                     results["errors"].append(f"{name} 第{row_number}行解析错误: {str(e)}")
@@ -988,6 +992,10 @@ def import_workbook(db: Session, wb: openpyxl.Workbook, results: Dict[str, Any],
                     rollback_import_row(db)
                     results["errors"].append(f"{name} 第{row_number}行解析错误: {str(e)}")
             db.flush()
+
+    align_genotype_entry_order(genotype_order)
+    db.flush()
+
 
 def normalize_cage_statuses(db: Session) -> int:
     """Reconcile status only after all cage and historical sheets have been merged."""
