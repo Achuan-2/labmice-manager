@@ -103,7 +103,10 @@
             <MouseColumnHeader v-bind="columnMenuProps(column.field, column.label)" v-on="columnMenuEvents(column.field)" />
           </template>
           <template #default="{ row, $index }">
-            <GenotypeGridCell v-bind="gridCellProps(row, column.field, $index)" v-on="gridCellEvents(row, column.field, $index)">
+            <span v-if="column.field === 'age_weeks'" class="text-xs font-bold text-emerald-600">
+              {{ row.age_weeks != null ? `${row.age_weeks} 周` : '-' }}
+            </span>
+            <GenotypeGridCell v-else v-bind="gridCellProps(row, column.field, $index)" v-on="gridCellEvents(row, column.field, $index)">
               <template v-if="column.field === 'strain'">
                 <span class="font-semibold text-blue-700">{{ row.strain || '-' }}</span>
               </template>
@@ -114,7 +117,6 @@
               </template>
               <div v-else-if="column.field === 'dob'" class="text-xs">
                 <span class="text-gray-700 font-mono">{{ row.dob || '-' }}</span>
-                <span v-if="row.age_weeks != null" class="ml-1.5 font-bold text-emerald-600">({{ row.age_weeks }} 周)</span>
               </div>
               <PedigreeTags v-else :parents="row.parents" @click-parent="openMouseDetail" />
             </GenotypeGridCell>
@@ -529,12 +531,13 @@ let loadRequestId = 0
 const mouseInfoColumns = [
   { field: 'strain', label: '品系 / 基因型', width: 180 },
   { field: 'gender', label: '性别', width: 110 },
-  { field: 'dob', label: '出生日期 / 周龄', width: 190 },
+  { field: 'dob', label: '出生日期', width: 155 },
+  { field: 'age_weeks', label: '周龄', width: 105 },
   { field: 'parents', label: '父母系谱 (M+F)', width: 230 },
 ]
 const noteColumns = [{ field: 'claim_purpose', label: '领用用途' }, { field: 'notes', label: '备注' }]
 
-const mouseSortFields = ['added', 'mouse_code', 'dob', 'strain', 'gender', 'parents', 'genotype_1', 'cage_code', 'owner_name', 'status', 'claim_purpose', 'notes']
+const mouseSortFields = ['added', 'mouse_code', 'dob', 'age_weeks', 'strain', 'gender', 'parents', 'genotype_1', 'cage_code', 'owner_name', 'status', 'claim_purpose', 'notes']
 const savedSortBy = localStorage.getItem('mice_sort_by')
 const savedSortOrder = localStorage.getItem('mice_sort_order')
 const sortBy = ref(mouseSortFields.includes(savedSortBy) ? savedSortBy : 'added')
@@ -641,9 +644,11 @@ const columnControls = computed(() => {
     mouse_code: [{ key: 'mouse_code', label: '耳标编号', placeholder: '输入完整耳标编号' }],
     strain: [{ key: 'strain', label: '品系', type: 'select', options: options(strainOptions.value) }],
     gender: [{ key: 'gender', label: '性别', type: 'select', options: gridOptions.value.gender }],
-    dob: [
+    age_weeks: [
       { key: 'age_weeks_gt', label: '周龄大于（周）', type: 'number' },
       { key: 'age_weeks_lt', label: '周龄小于（周）', type: 'number' },
+    ],
+    dob: [
       { key: 'dob_from', label: '出生日期起始', type: 'date' },
       { key: 'dob_to', label: '出生日期截止', type: 'date' },
     ],

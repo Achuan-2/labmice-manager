@@ -154,6 +154,15 @@ def enrich_mouse_response(m: Mouse, db: Optional[Session] = None) -> Dict[str, A
         "updated_at": m.updated_at
     }
 
+def mouse_age_days_expression():
+    """Match displayed ages: valid birth dates only, with future dates clamped to zero."""
+    return case(
+        (func.date(Mouse.dob, "+0 days") == Mouse.dob,
+         func.max(0, func.julianday(datetime.date.today().isoformat()) - func.julianday(Mouse.dob))),
+        else_=None,
+    )
+
+
 @router.get("")
 def list_mice(
     page: int = Query(1, ge=1),
@@ -178,7 +187,7 @@ def list_mice(
     claim_purpose: Optional[str] = None,
     notes: Optional[str] = None,
     sort_by: Literal[
-        "added", "mouse_code", "dob", "strain", "status", "gender", "parents",
+        "added", "mouse_code", "dob", "age_weeks", "strain", "status", "gender", "parents",
         "genotype_1", "cage_code", "owner_name", "claim_purpose", "notes",
     ] = "added",
     sort_order: Literal["asc", "desc"] = "desc",
@@ -239,9 +248,7 @@ def list_mice(
             query = query.filter(Mouse.dob <= dob_to.isoformat())
     if age_weeks_gt is not None or age_weeks_lt is not None:
         # Compare the exact age in days before pagination. Unknown dates evaluate to NULL and do not match.
-        # Clamp future birth dates to zero, consistently with the age shown in the table.
-        age_days = func.max(0, func.julianday(datetime.date.today().isoformat()) - func.julianday(Mouse.dob))
-        query = query.filter(func.date(Mouse.dob, "+0 days") == Mouse.dob)
+        age_days = mouse_age_days_expression()
         if age_weeks_gt is not None:
             query = query.filter(age_days > age_weeks_gt * 7)
         if age_weeks_lt is not None:
@@ -295,9 +302,12 @@ def list_mice(
         )
         order_clauses.append(relevance)
     if sort_by != "added":
-        sort_column = Cage.cage_code if sort_by == "cage_code" else getattr(Mouse, sort_by)
+        if sort_by == "age_weeks":
+            sort_column = mouse_age_days_expression()
+        else:
+            sort_column = Cage.cage_code if sort_by == "cage_code" else getattr(Mouse, sort_by)
         # Missing values stay last in either direction; ties follow entry order.
-        missing_value = func.coalesce(func.trim(sort_column), "") == ""
+        missing_value = sort_column.is_(None) if sort_by == "age_weeks" else func.coalesce(func.trim(sort_column), "") == ""
         order_clauses.append(case((missing_value, 1), else_=0))
         order_clauses.append(sort_column.asc() if sort_order == "asc" else sort_column.desc())
     # IDs persist the original insertion sequence across edits and all entry paths.

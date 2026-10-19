@@ -135,6 +135,15 @@ class MouseSortingTests(unittest.TestCase):
         self.assertEqual(self.codes(age_weeks_gt=8.1), ["R003"])
         self.assertEqual(self.codes(age_weeks_lt=7.9), ["R020"])
 
+    def test_week_age_sort_is_numeric_and_keeps_unknown_dates_last(self):
+        self.set_birth_dates_by_age(R100=56, R003=70, R020=7, R004=None)
+        self.assertEqual(self.codes(sort_by="age_weeks", sort_order="asc"), ["R020", "R100", "R003", "R004"])
+        self.assertEqual(self.codes(sort_by="age_weeks", sort_order="desc"), ["R003", "R100", "R020", "R004"])
+        self.assertEqual(self.codes(sort_by="age_weeks", age_weeks_gt=2), ["R003", "R100"])
+        self.assertEqual(self.codes(sort_by="age_weeks", page_size=1, page=2, sort_order="asc"), ["R100"])
+        self.set_birth_dates_by_age(R100=0, R003=-7, R020=7, R004=None)
+        self.assertEqual(self.codes(sort_by="age_weeks", sort_order="asc"), ["R100", "R003", "R020", "R004"])
+
     def test_week_age_filters_combine_with_dates_and_apply_before_pagination(self):
         self.set_birth_dates_by_age(R100=56, R003=70, R020=84, R004=None)
         self.assertEqual(self.codes(age_weeks_gt=7, age_weeks_lt=13, strain="B"), ["R020", "R100"])
