@@ -8,10 +8,7 @@
         </div>
       </div>
 
-      <div class="genotype-filters flex items-center gap-3">
-        <el-select v-model="filters.sort" style="width: 185px" aria-label="鉴定记录排序" @change="searchGenotypes">
-          <el-option v-for="option in genotypeSortOptions" :key="option.value" :label="option.label" :value="option.value" />
-        </el-select>
+      <div class="genotype-filters ml-auto flex items-center gap-3">
         <el-select v-model="filters.test_status" placeholder="全部鉴定状态" clearable style="width: 150px" @change="searchGenotypes">
           <el-option label="待鉴定" value="pending" />
           <el-option label="已鉴定" value="tested" />
@@ -31,6 +28,15 @@
         <el-button v-if="authStore.isAdmin" type="primary" plain @click="openAddDialog">
           <el-icon class="mr-1"><Plus /></el-icon> 录入鉴定结果
         </el-button>
+        <div class="ml-auto flex items-center gap-2" role="group" aria-label="基因鉴定结果排序">
+          <el-select v-model="sortBy" size="small" style="width: 140px" aria-label="排序方式" @change="searchGenotypes">
+            <el-option v-for="option in genotypeSortOptions" :key="option.value" :label="option.label" :value="option.value" />
+          </el-select>
+          <el-select v-model="sortOrder" size="small" style="width: 85px" aria-label="排序方向" @change="searchGenotypes">
+            <el-option label="升序" value="asc" />
+            <el-option label="降序" value="desc" />
+          </el-select>
+        </div>
       </div>
     </div>
 
@@ -298,12 +304,13 @@ const genotypeOptions = reactive({ genotype_1: [], genotype_2: [], genotype_3: [
 const genotypeFields = ['genotype_1', 'genotype_2', 'genotype_3']
 const genotypeLookupFields = ['test_date', ...genotypeFields, 'op_record', 'notes']
 const genotypeSortOptions = [
-  { value: 'added_desc', label: '添加顺序：倒序', sortBy: 'added', sortOrder: 'desc' },
-  { value: 'added_asc', label: '添加顺序：正序', sortBy: 'added', sortOrder: 'asc' },
-  { value: 'test_date_desc', label: '鉴定日期：从新到旧', sortBy: 'test_date', sortOrder: 'desc' },
-  { value: 'test_date_asc', label: '鉴定日期：从旧到新', sortBy: 'test_date', sortOrder: 'asc' }
+  { value: 'added', label: '录入顺序' },
+  { value: 'test_date', label: '鉴定日期' },
 ]
 const savedSort = localStorage.getItem('genotype_sort')
+const validSavedSort = genotypeSortOptions.some(option => (
+  ['asc', 'desc'].some(order => savedSort === `${option.value}_${order}`)
+))
 const gridSaving = ref(false)
 const activeCell = ref(null)
 const fillDrag = ref(null)
@@ -312,12 +319,20 @@ let loadRequestId = 0
 const filters = reactive({
   keyword: '',
   test_status: '',
-  sort: genotypeSortOptions.some(option => option.value === savedSort) ? savedSort : 'added_desc',
+  sort: validSavedSort ? savedSort : 'added_desc',
   genotype_1: [],
   genotype_2: [],
   genotype_3: []
 })
-const selectedSort = computed(() => genotypeSortOptions.find(option => option.value === filters.sort))
+// Keep the existing storage format so the two controls retain prior preferences.
+const sortBy = computed({
+  get: () => filters.sort.replace(/_(asc|desc)$/, ''),
+  set: value => { filters.sort = `${value}_${sortOrder.value}` },
+})
+const sortOrder = computed({
+  get: () => filters.sort.endsWith('_asc') ? 'asc' : 'desc',
+  set: value => { filters.sort = `${sortBy.value}_${value}` },
+})
 watch(() => filters.sort, value => localStorage.setItem('genotype_sort', value))
 
 // Show values already visible in the table while the full option list loads.
@@ -493,8 +508,8 @@ async function loadGenotypes() {
       page_size: pageSize.value,
       keyword: filters.keyword || undefined,
       test_status: filters.test_status || undefined,
-      sort_by: selectedSort.value.sortBy,
-      sort_order: selectedSort.value.sortOrder,
+      sort_by: sortBy.value,
+      sort_order: sortOrder.value,
       genotype_1_values: filters.genotype_1.length ? filters.genotype_1 : undefined,
       genotype_2_values: filters.genotype_2.length ? filters.genotype_2 : undefined,
       genotype_3_values: filters.genotype_3.length ? filters.genotype_3 : undefined
